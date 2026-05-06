@@ -2,10 +2,10 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { storage } from './storage.js';
 
 /* ============================================================
-   DOGGOS Â· OPS DASHBOARD â v2 (Google Sheets sources)
+   DOGGOS · OPS DASHBOARD — v2 (Google Sheets sources)
    Single-file React app. Two modes:
-     #kiosk  â wall-mounted iPad view, auto-refreshes every 60s
-     #admin  â configure sheet URLs + secret keys
+     #kiosk  → wall-mounted iPad view, auto-refreshes every 60s
+     #admin  → configure sheet URLs + secret keys
    Data sources:
      1. Mews reservations sheet (booking source of truth)
      2. HubSpot intake form sheet (pet dossier)
@@ -15,8 +15,8 @@ import { storage } from './storage.js';
 
 /* ----------------------- BRAND TOKENS ----------------------- */
 const C = {
-  cream:    '#EAE8DD',  // gris cÃ¡lido â primary surface
-  ink:      '#21392C',  // verde oscuro â primary ink
+  cream:    '#EAE8DD',  // gris cálido — primary surface
+  ink:      '#21392C',  // verde oscuro — primary ink
   amarillo: '#F5F53D',
   ocre:     '#BFB200',
   celeste:  '#78D9D8',
@@ -221,7 +221,7 @@ const parseList = (v) => {
 const isYes = (v) => {
   if (!v) return false;
   const s = String(v).toLowerCase().trim();
-  return s === 'sÃ­' || s === 'si' || s === 'yes' || s === 'true' || s === '1' || s === 'x';
+  return s === 'sí' || s === 'si' || s === 'yes' || s === 'true' || s === '1' || s === 'x';
 };
 const normEmail = (v) => String(v || '').toLowerCase().trim();
 const normName = (v) =>
@@ -230,7 +230,7 @@ const normName = (v) =>
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-const eur = (n) => `â¬${Math.round(n).toLocaleString('es-ES')}`;
+const eur = (n) => `€${Math.round(n).toLocaleString('es-ES')}`;
 const pct = (n) => `${Math.round(n)}%`;
 const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
 
@@ -267,9 +267,9 @@ function parseHubSpotRow(row) {
   const arrival = combineDateTime(arrDate, arrTime);
   const departure = combineDateTime(depDate, depTime);
 
-  const drugName = row['Nombre del fÃ¡rmaco'] || '';
+  const drugName = row['Nombre del fármaco'] || '';
   const dose = row['Dosis'] || '';
-  const schedule = row['DÃ­as de las dosis'] || '';
+  const schedule = row['Días de las dosis'] || '';
   const medications = drugName ? [{ name: drugName, dose, schedule }] : [];
 
   return {
@@ -277,19 +277,19 @@ function parseHubSpotRow(row) {
     id: row['Conversion ID'] || row['Contact ID'] || '',
     guest: `${row.Nombre || ''} ${row.Apellidos || ''}`.trim(),
     email: normEmail(row.Correo || row['Contact email']),
-    phone: row['NÃºmero de telÃ©fono de WhatsApp'] || '',
+    phone: row['Número de teléfono de WhatsApp'] || '',
     pickup: row['Persona autorizada para recogida/entrega'] || '',
     pet: row['Nombre del perro'] || '',
     breed: row.Raza || '',
-    size: row.TamaÃ±o || '',
+    size: row.Tamaño || '',
     sex: row.Sexo || '',
     weight: row['Peso (kg)'] || '',
     age: row.Edad || '',
     birthDate: row['Fecha de nacimiento'] || '',
-    chip: row['NÃºmero de chip'] || '',
-    healthCard: row['NÃºmero de Cartilla Sanitaria'] || '',
+    chip: row['Número de chip'] || '',
+    healthCard: row['Número de Cartilla Sanitaria'] || '',
     sterilized: isYes(row.Esterilizado),
-    lastVaccination: row['Ãltima vacunaciÃ³n polivalente'] || '',
+    lastVaccination: row['Última vacunación polivalente'] || '',
     arrival,
     departure,
     service: row.Servicio || '',
@@ -298,7 +298,7 @@ function parseHubSpotRow(row) {
     pathologies: parseList(row.Patologias),
     medications,
     medicalNotes: row['Observaciones medicas'] || '',
-    insurer: row['CompaÃ±Ã­a aseguradora'] || '',
+    insurer: row['Compañía aseguradora'] || '',
     foodType: row['Tipo de comida'] || '',
     foodBrand: row['Marca de comida'] || '',
     foodAmount: row['Cantidad diaria (gramos)'] || '',
@@ -309,16 +309,16 @@ function parseHubSpotRow(row) {
     supplements: row['Suplementos'] || '',
     rituals: row['Rituales o costumbres'] || '',
     notes: row.Observaciones || '',
-    vetClinic: row['ClÃ­nica habitual'] || '',
-    vetAddress: row['DirecciÃ³n (2)'] || '',
-    vetPhone: row['TelÃ©fono clinica'] || '',
+    vetClinic: row['Clínica habitual'] || '',
+    vetAddress: row['Dirección (2)'] || '',
+    vetPhone: row['Teléfono clinica'] || '',
     emergency1: row['Contacto emergencia 1'] || '',
     emergency2: row['Contacto emergencia 2'] || '',
     submittedAt: parseDate(row['Conversion Date']),
     authorizedMedical: isYes(row['Autorizo tratamiento veterinario de urgencia cuando doggos lo considere necesario y asumo sus costes.']),
-    authorizedMedication: isYes(row['Autorizo administraciÃ³n de medicaciÃ³n conforme a las instrucciones aportadas.']),
+    authorizedMedication: isYes(row['Autorizo administración de medicación conforme a las instrucciones aportadas.']),
     authorizedTransport: isYes(row['Autorizo transporte contratado.']),
-    authorizedImages: isYes(row['Autorizo uso de imÃ¡genes con fines informativos/publicitarios.']),
+    authorizedImages: isYes(row['Autorizo uso de imágenes con fines informativos/publicitarios.']),
   };
 }
 
@@ -389,9 +389,9 @@ function mergeReservations(mewsList, hubspotList) {
 /* ----------------------- structured alerts ----------------------- */
 
 const ALERT_STYLES = {
-  medical:   { label: 'MÃ©dico',     pastilla: 'pastilla',         tint: 'amarillo-tint', priority: 0 },
+  medical:   { label: 'Médico',     pastilla: 'pastilla',         tint: 'amarillo-tint', priority: 0 },
   allergy:   { label: 'Alergia',    pastilla: 'pastilla',         tint: 'amarillo-tint', priority: 1 },
-  pathology: { label: 'PatologÃ­a',  pastilla: 'pastilla ocre',    tint: 'amarillo-tint', priority: 2 },
+  pathology: { label: 'Patología',  pastilla: 'pastilla ocre',    tint: 'amarillo-tint', priority: 2 },
   behavior:  { label: 'Manejo',     pastilla: 'pastilla ocre',    tint: '',              priority: 3 },
   diet:      { label: 'Dieta',      pastilla: 'pastilla celeste', tint: 'celeste-tint',  priority: 4 },
   transport: { label: 'Transporte', pastilla: 'pastilla celeste', tint: '',              priority: 5 },
@@ -404,7 +404,7 @@ function detectAlerts(record) {
   // Medical (structured)
   if (record.medications?.length > 0 && record.medications[0].name) {
     const m = record.medications[0];
-    const detail = [m.name, m.dose, m.schedule].filter(Boolean).join(' Â· ');
+    const detail = [m.name, m.dose, m.schedule].filter(Boolean).join(' · ');
     alerts.push({ type: 'medical', detail });
   }
 
@@ -428,7 +428,7 @@ function detectAlerts(record) {
     alerts.push({ type: 'transport', detail: 'Recogida/entrega contratada' });
   }
 
-  // Behavior (keyword scan â no structured field)
+  // Behavior (keyword scan — no structured field)
   const behaviorKeywords = ['agresiv', 'reactiv', 'mord', 'miedo', 'fearful', 'ansied', 'separac', 'no socializ'];
   const allText = [record.notes, record.medicalNotes, record.rituals].filter(Boolean).join(' ').toLowerCase();
   if (behaviorKeywords.some((kw) => allText.includes(kw))) {
@@ -467,7 +467,7 @@ async function fetchSheet(url, key) {
   try {
     data = await res.json();
   } catch (e) {
-    throw new Error('Respuesta no es JSON vÃ¡lido (revisa el script)');
+    throw new Error('Respuesta no es JSON válido (revisa el script)');
   }
   if (data && data.error) throw new Error(`Apps Script: ${data.error}`);
   if (!Array.isArray(data)) throw new Error('Respuesta no es un array');
@@ -489,7 +489,7 @@ function buildDemoRow(opts) {
     id: opts.id, confirmation: opts.id,
     guest: opts.guest, email: opts.email || '',
     arrival: opts.arrival, departure: opts.departure,
-    service: opts.service || 'Hotel', spaceType: opts.spaceType || 'Suite estÃ¡ndar',
+    service: opts.service || 'Hotel', spaceType: opts.spaceType || 'Suite estándar',
     rate: opts.rate || 58, amount: opts.amount || 290,
     notes: opts.notes || '', origin: 'web',
     products: opts.products || '', personCount: 1, enterprise: 'doggos',
@@ -511,40 +511,40 @@ function buildDemoRow(opts) {
 
 const DEMO_DATA = [
   // Today's arrivals
-  buildDemoRow({ id: 'AAA-1042', guest: 'PÃ©rez Soler', email: 'perez@example.com', pet: 'Luna', breed: 'Golden Retriever', size: 'Grande', weight: '28', arrival: offsetDate(0, 9), departure: offsetDate(5, 11), rate: 57, amount: 285, foodBrand: 'Acana', foodAmount: '350', notes: 'Muy sociable.' }),
-  buildDemoRow({ id: 'AAA-1043', guest: 'MartÃ­ Vila', email: 'marti@example.com', pet: 'Toby', breed: 'Bulldog FrancÃ©s', size: 'Mediano', weight: '12', arrival: offsetDate(0, 10), departure: offsetDate(3, 11), rate: 65, amount: 195, transport: true, notes: 'Roncador, lo saben.' }),
-  buildDemoRow({ id: 'AAA-1044', guest: 'LÃ³pez Bernat', email: 'lopez@example.com', pet: 'Coco', breed: 'Caniche', size: 'PequeÃ±o', weight: '8', arrival: offsetDate(0, 11), departure: offsetDate(7, 11), rate: 67, amount: 469, spaceType: 'Suite mÃ©dica', pathologies: ['Diabetes'], medications: [{ name: 'Insulina', dose: '10 UI', schedule: '2x/dÃ­a (maÃ±ana y noche)' }] }),
-  buildDemoRow({ id: 'AAA-1045', guest: 'Rovira Casals', email: 'rovira@example.com', pet: 'Mia', breed: 'BichÃ³n MaltÃ©s', size: 'PequeÃ±o', weight: '5', arrival: offsetDate(0, 14), departure: offsetDate(4, 11), rate: 62, amount: 248, allergies: ['Pollo'], prohibitedFoods: 'pollo y derivados', foodBrand: 'Pienso hipoalergÃ©nico (aporta el dueÃ±o)' }),
-  buildDemoRow({ id: 'AAA-1046', guest: 'Vidal Puig', email: 'vidal@example.com', pet: 'Rocky', breed: 'Pastor AlemÃ¡n', size: 'Grande', weight: '34', arrival: offsetDate(0, 16), departure: offsetDate(2, 11), rate: 72, amount: 144, spaceType: 'Suite solo', notes: 'Reactivo con otros perros macho. Pasear solo.', rituals: 'Caminata individual por la maÃ±ana.' }),
+  buildDemoRow({ id: 'AAA-1042', guest: 'Pérez Soler', email: 'perez@example.com', pet: 'Luna', breed: 'Golden Retriever', size: 'Grande', weight: '28', arrival: offsetDate(0, 9), departure: offsetDate(5, 11), rate: 57, amount: 285, foodBrand: 'Acana', foodAmount: '350', notes: 'Muy sociable.' }),
+  buildDemoRow({ id: 'AAA-1043', guest: 'Martí Vila', email: 'marti@example.com', pet: 'Toby', breed: 'Bulldog Francés', size: 'Mediano', weight: '12', arrival: offsetDate(0, 10), departure: offsetDate(3, 11), rate: 65, amount: 195, transport: true, notes: 'Roncador, lo saben.' }),
+  buildDemoRow({ id: 'AAA-1044', guest: 'López Bernat', email: 'lopez@example.com', pet: 'Coco', breed: 'Caniche', size: 'Pequeño', weight: '8', arrival: offsetDate(0, 11), departure: offsetDate(7, 11), rate: 67, amount: 469, spaceType: 'Suite médica', pathologies: ['Diabetes'], medications: [{ name: 'Insulina', dose: '10 UI', schedule: '2x/día (mañana y noche)' }] }),
+  buildDemoRow({ id: 'AAA-1045', guest: 'Rovira Casals', email: 'rovira@example.com', pet: 'Mia', breed: 'Bichón Maltés', size: 'Pequeño', weight: '5', arrival: offsetDate(0, 14), departure: offsetDate(4, 11), rate: 62, amount: 248, allergies: ['Pollo'], prohibitedFoods: 'pollo y derivados', foodBrand: 'Pienso hipoalergénico (aporta el dueño)' }),
+  buildDemoRow({ id: 'AAA-1046', guest: 'Vidal Puig', email: 'vidal@example.com', pet: 'Rocky', breed: 'Pastor Alemán', size: 'Grande', weight: '34', arrival: offsetDate(0, 16), departure: offsetDate(2, 11), rate: 72, amount: 144, spaceType: 'Suite solo', notes: 'Reactivo con otros perros macho. Pasear solo.', rituals: 'Caminata individual por la mañana.' }),
   buildDemoRow({ id: 'AAA-1047', guest: 'Garcia Roca', email: 'garcia@example.com', pet: 'Brisa', breed: 'Labrador', size: 'Grande', weight: '26', arrival: offsetDate(0, 17), departure: offsetDate(10, 11), rate: 72, amount: 720, spaceType: 'Suite premium', products: 'VIP', notes: 'Cliente habitual desde 2023. Mantener kong en cama.' }),
 
   // Today's departures
-  buildDemoRow({ id: 'AAA-1031', guest: 'Soler Mas', email: 'soler@example.com', pet: 'Max', breed: 'Beagle', size: 'Mediano', weight: '14', arrival: offsetDate(-5, 10), departure: offsetDate(0, 11), rate: 58, amount: 290, notes: 'Padre vendrÃ¡ a recoger antes de las 11h.' }),
-  buildDemoRow({ id: 'AAA-1032', guest: 'Ruiz Bosch', email: 'ruiz@example.com', pet: 'Bella', breed: 'Caniche toy', size: 'PequeÃ±o', weight: '4', arrival: offsetDate(-3, 14), departure: offsetDate(0, 12), rate: 58, amount: 174, notes: 'Dejar baÃ±o antes de salir.' }),
-  buildDemoRow({ id: 'AAA-1033', guest: 'Casas VerdÃº', email: 'casas@example.com', pet: 'Hugo', breed: 'Setter', size: 'Grande', weight: '22', arrival: offsetDate(-7, 16), departure: offsetDate(0, 17), rate: 67, amount: 469 }),
+  buildDemoRow({ id: 'AAA-1031', guest: 'Soler Mas', email: 'soler@example.com', pet: 'Max', breed: 'Beagle', size: 'Mediano', weight: '14', arrival: offsetDate(-5, 10), departure: offsetDate(0, 11), rate: 58, amount: 290, notes: 'Padre vendrá a recoger antes de las 11h.' }),
+  buildDemoRow({ id: 'AAA-1032', guest: 'Ruiz Bosch', email: 'ruiz@example.com', pet: 'Bella', breed: 'Caniche toy', size: 'Pequeño', weight: '4', arrival: offsetDate(-3, 14), departure: offsetDate(0, 12), rate: 58, amount: 174, notes: 'Dejar baño antes de salir.' }),
+  buildDemoRow({ id: 'AAA-1033', guest: 'Casas Verdú', email: 'casas@example.com', pet: 'Hugo', breed: 'Setter', size: 'Grande', weight: '22', arrival: offsetDate(-7, 16), departure: offsetDate(0, 17), rate: 67, amount: 469 }),
 
   // In-house (continuing)
   buildDemoRow({ id: 'AAA-1034', guest: 'Mendoza Coll', pet: 'Nala', breed: 'Husky', size: 'Grande', weight: '24', arrival: offsetDate(-2, 10), departure: offsetDate(2, 11), rate: 58, amount: 232 }),
-  buildDemoRow({ id: 'AAA-1035', guest: 'Torres Riba', pet: 'Simba', breed: 'Border Collie', size: 'Mediano', weight: '18', arrival: offsetDate(-4, 11), departure: offsetDate(1, 11), rate: 58, amount: 290, notes: 'Mucha energÃ­a. SesiÃ³n de juego extra.' }),
-  buildDemoRow({ id: 'AAA-1036', guest: 'Navarro Pla', pet: 'Lola', breed: 'Carlino', size: 'PequeÃ±o', weight: '8', arrival: offsetDate(-1, 9), departure: offsetDate(6, 11), rate: 58, amount: 406, pathologies: ['SÃ­ndrome braquicefÃ¡lico'], notes: 'Cuidado con el calor.' }),
-  buildDemoRow({ id: 'AAA-1037', guest: 'Esteve Roig', pet: 'Thor', breed: 'MastÃ­n', size: 'Gigante', weight: '52', arrival: offsetDate(-3, 10), departure: offsetDate(4, 11), rate: 75, amount: 525, spaceType: 'Suite XL' }),
-  buildDemoRow({ id: 'AAA-1038', guest: 'Font SabatÃ©', pet: 'Maya', breed: 'Mestiza', size: 'PequeÃ±o', weight: '6', arrival: offsetDate(-2, 14), departure: offsetDate(3, 11), rate: 58, amount: 290, notes: 'Ansiedad por separaciÃ³n.', rituals: 'Le calma una mantita azul que aporta el dueÃ±o.' }),
+  buildDemoRow({ id: 'AAA-1035', guest: 'Torres Riba', pet: 'Simba', breed: 'Border Collie', size: 'Mediano', weight: '18', arrival: offsetDate(-4, 11), departure: offsetDate(1, 11), rate: 58, amount: 290, notes: 'Mucha energía. Sesión de juego extra.' }),
+  buildDemoRow({ id: 'AAA-1036', guest: 'Navarro Pla', pet: 'Lola', breed: 'Carlino', size: 'Pequeño', weight: '8', arrival: offsetDate(-1, 9), departure: offsetDate(6, 11), rate: 58, amount: 406, pathologies: ['Síndrome braquicefálico'], notes: 'Cuidado con el calor.' }),
+  buildDemoRow({ id: 'AAA-1037', guest: 'Esteve Roig', pet: 'Thor', breed: 'Mastín', size: 'Gigante', weight: '52', arrival: offsetDate(-3, 10), departure: offsetDate(4, 11), rate: 75, amount: 525, spaceType: 'Suite XL' }),
+  buildDemoRow({ id: 'AAA-1038', guest: 'Font Sabaté', pet: 'Maya', breed: 'Mestiza', size: 'Pequeño', weight: '6', arrival: offsetDate(-2, 14), departure: offsetDate(3, 11), rate: 58, amount: 290, notes: 'Ansiedad por separación.', rituals: 'Le calma una mantita azul que aporta el dueño.' }),
   buildDemoRow({ id: 'AAA-1039', guest: 'Bosch Ferrer', pet: 'Olivia', breed: 'Labrador', size: 'Grande', weight: '27', arrival: offsetDate(-5, 16), departure: offsetDate(2, 11), rate: 58, amount: 406, notes: 'VIP, viene cada mes.' }),
-  buildDemoRow({ id: 'AAA-1040', guest: 'Ribas Camps', pet: 'Zeus', breed: 'DÃ³berman', size: 'Grande', weight: '36', arrival: offsetDate(-1, 11), departure: offsetDate(8, 11), rate: 58, amount: 522, medications: [{ name: 'Cosequin DS', dose: '1 cÃ¡psula', schedule: 'con la cena' }], pathologies: ['Displasia de cadera'] }),
+  buildDemoRow({ id: 'AAA-1040', guest: 'Ribas Camps', pet: 'Zeus', breed: 'Dóberman', size: 'Grande', weight: '36', arrival: offsetDate(-1, 11), departure: offsetDate(8, 11), rate: 58, amount: 522, medications: [{ name: 'Cosequin DS', dose: '1 cápsula', schedule: 'con la cena' }], pathologies: ['Displasia de cadera'] }),
   buildDemoRow({ id: 'AAA-1041', guest: 'Vives Pons', pet: 'Pepa', breed: 'Schnauzer', size: 'Mediano', weight: '11', arrival: offsetDate(-2, 9), departure: offsetDate(5, 11), rate: 58, amount: 406 }),
 
   // Future
   buildDemoRow({ id: 'AAA-1048', guest: 'Pujol Riera', pet: 'Kira', breed: 'Akita', size: 'Grande', weight: '29', arrival: offsetDate(1, 10), departure: offsetDate(6, 11), rate: 58, amount: 290 }),
-  buildDemoRow({ id: 'AAA-1049', guest: 'Serra Boix', pet: 'Boby', breed: 'Yorkshire', size: 'PequeÃ±o', weight: '4', arrival: offsetDate(1, 14), departure: offsetDate(4, 11), rate: 58, amount: 174 }),
+  buildDemoRow({ id: 'AAA-1049', guest: 'Serra Boix', pet: 'Boby', breed: 'Yorkshire', size: 'Pequeño', weight: '4', arrival: offsetDate(1, 14), departure: offsetDate(4, 11), rate: 58, amount: 174 }),
   buildDemoRow({ id: 'AAA-1050', guest: 'Camps Oliva', pet: 'Duna', breed: 'Galgo', size: 'Grande', weight: '24', arrival: offsetDate(2, 10), departure: offsetDate(9, 11), rate: 58, amount: 406, notes: 'Recientemente adoptado. Miedo a ruidos fuertes.', rituals: 'Necesita un espacio tranquilo, lejos de zonas de juego.' }),
 ];
 
 const DEMO_PENDING = 2; // pretend 2 HubSpot intakes without Mews bookings
 
 const DEMO_CALENDLY = [
-  { source: 'calendly', id: 'cal-1', eventType: 'visita-30min', eventName: 'Visita Doggos Â· 30 min', host: 'Alan GarcÃ­a', time: offsetDate(0, 11), location: 'Doggos Ullastrell', invitee: 'Carla DomÃ¨nech', email: 'carla.d@example.com', kind: 'visit' },
-  { source: 'calendly', id: 'cal-2', eventType: 'llamada-descubrimiento', eventName: 'Llamada de descubrimiento', host: 'Laura Ellison', time: offsetDate(0, 16), location: 'Google Meet', meetingUrl: 'https://meet.google.com/...', invitee: 'Marc OlivÃ©', email: 'marc.o@example.com', kind: 'call' },
-  { source: 'calendly', id: 'cal-3', eventType: 'visita-30min', eventName: 'Visita Doggos Â· 30 min', host: 'Alan GarcÃ­a', time: offsetDate(1, 10, 30), location: 'Doggos Ullastrell', invitee: 'Anna Puig', email: 'anna@example.com', kind: 'visit' },
+  { source: 'calendly', id: 'cal-1', eventType: 'visita-30min', eventName: 'Visita Doggos · 30 min', host: 'Alan García', time: offsetDate(0, 11), location: 'Doggos Ullastrell', invitee: 'Carla Domènech', email: 'carla.d@example.com', kind: 'visit' },
+  { source: 'calendly', id: 'cal-2', eventType: 'llamada-descubrimiento', eventName: 'Llamada de descubrimiento', host: 'Laura Ellison', time: offsetDate(0, 16), location: 'Google Meet', meetingUrl: 'https://meet.google.com/...', invitee: 'Marc Olivé', email: 'marc.o@example.com', kind: 'call' },
+  { source: 'calendly', id: 'cal-3', eventType: 'visita-30min', eventName: 'Visita Doggos · 30 min', host: 'Alan García', time: offsetDate(1, 10, 30), location: 'Doggos Ullastrell', invitee: 'Anna Puig', email: 'anna@example.com', kind: 'visit' },
   { source: 'calendly', id: 'cal-4', eventType: 'consulta-adiestramiento', eventName: 'Consulta adiestramiento', host: 'Stephanie Roca', time: offsetDate(1, 15), location: 'Doggos Ullastrell', invitee: 'Jordi Vives', email: 'jordi.v@example.com', kind: 'other' },
   { source: 'calendly', id: 'cal-5', eventType: 'llamada-onboarding', eventName: 'Llamada onboarding nuevo cliente', host: 'Laura Ellison', time: offsetDate(1, 17), location: 'Zoom', meetingUrl: 'https://zoom.us/...', invitee: 'Pol Carreras', email: 'pol@example.com', kind: 'call' },
 ];
@@ -834,7 +834,7 @@ export default function App() {
       <style>{STYLES}</style>
       {loading ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
-          <span className="display" style={{ fontSize: 32, color: C.ink, opacity: 0.5 }}>cargandoâ¦</span>
+          <span className="display" style={{ fontSize: 32, color: C.ink, opacity: 0.5 }}>cargando…</span>
         </div>
       ) : mode === 'admin' ? (
         <AdminView
@@ -958,7 +958,7 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
           <MountainMark size={32} color={C.ink} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <Wordmark size={32} />
-            <span className="eyebrow eyebrow-sm" style={{ opacity: 0.7 }}>Operaciones Â· Ullastrell</span>
+            <span className="eyebrow eyebrow-sm" style={{ opacity: 0.7 }}>Operaciones · Ullastrell</span>
           </div>
         </div>
 
@@ -981,7 +981,7 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
             style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: C.ink, opacity: 0.4, padding: 0 }}
             aria-label="Admin"
           >
-            â admin
+            ⚙ admin
           </button>
         </div>
       </header>
@@ -999,7 +999,7 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
         <OccupancyCells inHouse={inHouse.length} capacity={meta.capacity} />
       </section>
 
-      {/* Calendly strip â today + tomorrow */}
+      {/* Calendly strip — today + tomorrow */}
       <CalendlyStrip events={upcomingEvents} todayCount={eventsTodayCount} />
 
       {/* Three columns */}
@@ -1016,7 +1016,7 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
             : departuresToday.map((r) => <GuestRow key={r.id} r={r} time={r.departure} variant="departure" />)}
         </Column>
 
-        <Column title="Alertas activas" eyebrow="AtenciÃ³n" count={alertsList.length}>
+        <Column title="Alertas activas" eyebrow="Atención" count={alertsList.length}>
           {alertsList.length === 0
             ? <Empty>Sin alertas operativas</Empty>
             : alertsList.map((a, i) => <AlertRow key={`${a.res.id}-${a.type}-${i}`} res={a.res} type={a.type} detail={a.detail} />)}
@@ -1030,11 +1030,11 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
           <div className="empty-card">
             <MountainMark size={42} color={C.ink} />
             <div className="display" style={{ fontSize: 32, marginTop: 16, marginBottom: 12 }}>
-              Configura los orÃ­genes.
+              Configura los orígenes.
             </div>
             <p style={{ fontSize: 15, opacity: 0.75, marginBottom: 24 }}>
               Pega las URLs de tus dos Apps Scripts (Mews y HubSpot) en el panel admin para empezar.
-              TambiÃ©n puedes cargar datos demo para ver el panel funcionando.
+              También puedes cargar datos demo para ver el panel funcionando.
             </p>
             <button onClick={() => onSwitchMode('admin')} className="btn">
               Ir al admin
@@ -1082,15 +1082,15 @@ function CalendlyStrip({ events, todayCount }) {
   return (
     <section style={{ margin: '14px 32px 0', padding: '12px 16px', borderRadius: 16, border: `1.5px solid ${C.ink}`, background: C.cream, display: 'flex', alignItems: 'center', gap: 14, minHeight: 76 }}>
       <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2, paddingRight: 14, borderRight: `1px solid ${C.ink15}` }}>
-        <span className="eyebrow eyebrow-sm" style={{ opacity: 0.6 }}>PrÃ³ximas citas</span>
+        <span className="eyebrow eyebrow-sm" style={{ opacity: 0.6 }}>Próximas citas</span>
         <span className="display tabular" style={{ fontSize: 22, lineHeight: 1 }}>
           {todayCount}
           <span style={{ opacity: 0.4, fontSize: 16 }}> hoy</span>
           {tomorrowCount > 0 && (
             <>
-              <span style={{ opacity: 0.4, fontSize: 16 }}> Â· </span>
+              <span style={{ opacity: 0.4, fontSize: 16 }}> · </span>
               {tomorrowCount}
-              <span style={{ opacity: 0.4, fontSize: 16 }}> maÃ±</span>
+              <span style={{ opacity: 0.4, fontSize: 16 }}> mañ</span>
             </>
           )}
         </span>
@@ -1099,7 +1099,7 @@ function CalendlyStrip({ events, todayCount }) {
       <div style={{ flex: 1, display: 'flex', gap: 8, overflow: 'hidden' }}>
         {visible.length === 0 ? (
           <span className="eyebrow eyebrow-sm" style={{ opacity: 0.4, alignSelf: 'center' }}>
-            Sin citas hoy ni maÃ±ana
+            Sin citas hoy ni mañana
           </span>
         ) : (
           visible.map((e) => <CalendlyCard key={e.id} event={e} />)
@@ -1108,7 +1108,7 @@ function CalendlyStrip({ events, todayCount }) {
 
       {overflow > 0 && (
         <span className="pastilla outline tabular eyebrow-sm" style={{ flexShrink: 0 }}>
-          +{overflow} mÃ¡s
+          +{overflow} más
         </span>
       )}
     </section>
@@ -1132,7 +1132,7 @@ function CalendlyCard({ event }) {
     }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 6 }}>
         <span className="eyebrow tabular" style={{ fontSize: 11 }}>
-          {!isToday && <span style={{ opacity: 0.55, marginRight: 4 }}>MAÃ</span>}
+          {!isToday && <span style={{ opacity: 0.55, marginRight: 4 }}>MAÑ</span>}
           {t}
         </span>
         <span className={kindDef.pastilla} style={{ fontSize: 9, padding: '2px 7px' }}>
@@ -1140,7 +1140,7 @@ function CalendlyCard({ event }) {
         </span>
       </div>
       <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {event.invitee || 'â'}
+        {event.invitee || '—'}
       </div>
       <div className="eyebrow eyebrow-sm" style={{ opacity: 0.65, fontSize: 9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>
         <span className="dot" style={{ background: isVirtual ? C.celeste : C.amarillo, width: 5, height: 5 }} />
@@ -1171,27 +1171,27 @@ function GuestRow({ r, time, variant }) {
   const flags = detectAlerts(r);
   const tint = topAlertTint(flags);
   const t = time ? `${pad2(time.getHours())}:${pad2(time.getMinutes())}` : '--';
-  const breedSize = [r.breed, r.size].filter(Boolean).join(' Â· ');
+  const breedSize = [r.breed, r.size].filter(Boolean).join(' · ');
   return (
     <div className={`row fade-in ${tint}`}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
         <span className="eyebrow tabular" style={{ color: variant === 'arrival' ? C.ink : C.ocre }}>
-          {variant === 'arrival' ? 'â' : 'â'} {t}
+          {variant === 'arrival' ? '↘' : '↗'} {t}
         </span>
         <span className="eyebrow eyebrow-sm" style={{ opacity: 0.55, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {r.spaceType || r.service}
         </span>
       </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 2 }}>
-        <span className="display" style={{ fontSize: 22, lineHeight: 1 }}>{r.pet || r.guest || 'â'}</span>
+        <span className="display" style={{ fontSize: 22, lineHeight: 1 }}>{r.pet || r.guest || '—'}</span>
         {r.pet && r.guest && (
           <span style={{ fontSize: 13, opacity: 0.6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            Â· {r.guest}
+            · {r.guest}
           </span>
         )}
       </div>
       {breedSize && (
-        <span className="eyebrow eyebrow-sm" style={{ opacity: 0.5, marginTop: 1 }}>{breedSize}{r.weight ? ` Â· ${r.weight} kg` : ''}</span>
+        <span className="eyebrow eyebrow-sm" style={{ opacity: 0.5, marginTop: 1 }}>{breedSize}{r.weight ? ` · ${r.weight} kg` : ''}</span>
       )}
       {flags.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
@@ -1216,7 +1216,7 @@ function AlertRow({ res, type, detail }) {
       </div>
       {res.pet && res.guest && (
         <span className="eyebrow eyebrow-sm" style={{ opacity: 0.55, marginTop: 2 }}>
-          {res.guest} Â· {res.spaceType || res.service}
+          {res.guest} · {res.spaceType || res.service}
         </span>
       )}
       <p style={{ fontSize: 13, lineHeight: 1.45, marginTop: 6 }}>{detail}</p>
@@ -1257,7 +1257,7 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, fetchErrors,
             <MountainMark size={36} />
             <div>
               <Wordmark size={36} />
-              <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6, marginTop: 4 }}>Operaciones Â· Admin</div>
+              <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6, marginTop: 4 }}>Operaciones · Admin</div>
             </div>
           </div>
           <button onClick={() => onSwitchMode('kiosk')} className="btn">
@@ -1267,16 +1267,16 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, fetchErrors,
 
         {/* Sources config */}
         <div className="tile" style={{ padding: 28 }}>
-          <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6 }}>OrÃ­genes de datos</div>
-          <h3 className="display" style={{ fontSize: 32, lineHeight: 1, marginTop: 4, marginBottom: 8 }}>Google Sheets Â· Apps Script</h3>
+          <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6 }}>Orígenes de datos</div>
+          <h3 className="display" style={{ fontSize: 32, lineHeight: 1, marginTop: 4, marginBottom: 8 }}>Google Sheets · Apps Script</h3>
           <p style={{ fontSize: 14, opacity: 0.75, lineHeight: 1.55, marginBottom: 24, maxWidth: 720 }}>
             Pega las URLs de los web apps de Apps Script y la clave secreta que configuraste en cada script.
-            Si necesitas la plantilla del script, Ã¡brela debajo.
+            Si necesitas la plantilla del script, ábrela debajo.
           </p>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
             <SourceField
-              title="Mews Â· Reservas"
+              title="Mews · Reservas"
               eyebrow="Origen 1"
               status={merged.length > 0 ? `${merged.length} reservas` : 'sin datos'}
               error={fetchErrors.mews}
@@ -1286,7 +1286,7 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, fetchErrors,
               onKeyChange={(v) => setDraft({ ...draft, mewsKey: v })}
             />
             <SourceField
-              title="HubSpot Â· Intake"
+              title="HubSpot · Intake"
               eyebrow="Origen 2"
               status={pending.length > 0 ? `${pending.length} sin reserva` : 'enriquecimiento'}
               error={fetchErrors.hubspot}
@@ -1297,7 +1297,7 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, fetchErrors,
               tone="celeste"
             />
             <SourceField
-              title="Calendly Â· Citas"
+              title="Calendly · Citas"
               eyebrow="Origen 3"
               status={calendlyEvents.length > 0 ? `${calendlyEvents.length} eventos` : 'sin datos'}
               error={fetchErrors.calendly}
@@ -1311,15 +1311,15 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, fetchErrors,
 
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <button onClick={() => onSaveConfig(draft)} disabled={!dirty} className="btn">
-              Guardar configuraciÃ³n
+              Guardar configuración
             </button>
             <button onClick={onRefresh} disabled={refreshing || (!draft.mewsUrl && !draft.hubspotUrl && !draft.calendlyUrl)} className="btn celeste">
-              {refreshing ? 'Actualizandoâ¦' : 'Probar / actualizar ahora'}
+              {refreshing ? 'Actualizando…' : 'Probar / actualizar ahora'}
             </button>
             {dirty && <span className="eyebrow eyebrow-sm" style={{ color: C.brick }}>cambios sin guardar</span>}
             {meta.lastUpdated && !dirty && (
               <span className="eyebrow eyebrow-sm" style={{ opacity: 0.55 }}>
-                Ãºltima actualizaciÃ³n: {new Date(meta.lastUpdated).toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                última actualización: {new Date(meta.lastUpdated).toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
               </span>
             )}
           </div>
@@ -1327,10 +1327,10 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, fetchErrors,
 
         {/* Capacity */}
         <div className="tile" style={{ padding: 24, marginTop: 20 }}>
-          <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6 }}>ConfiguraciÃ³n</div>
+          <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6 }}>Configuración</div>
           <h3 className="display" style={{ fontSize: 28, lineHeight: 1, marginTop: 4 }}>Capacidad total</h3>
           <p style={{ fontSize: 14, opacity: 0.75, marginTop: 8, marginBottom: 16 }}>
-            NÃºmero total de plazas para calcular la ocupaciÃ³n.
+            Número total de plazas para calcular la ocupación.
           </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <input
@@ -1354,12 +1354,12 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, fetchErrors,
               <h3 className="display" style={{ fontSize: 28, lineHeight: 1, marginTop: 4 }}>Plantilla del Apps Script</h3>
             </div>
             <button onClick={() => setShowScript((s) => !s)} className="btn secondary sm">
-              {showScript ? 'Ocultar' : 'Ver cÃ³digo'}
+              {showScript ? 'Ocultar' : 'Ver código'}
             </button>
           </div>
           <p style={{ fontSize: 14, opacity: 0.75, marginTop: 12, marginBottom: 16 }}>
-            Pega esto en Extensiones â Apps Script de cada hoja. Cambia la SECRET, despliega como web app
-            (Ejecutar como: yo / Acceso: cualquier persona) y copia la URL aquÃ­ arriba.
+            Pega esto en Extensiones → Apps Script de cada hoja. Cambia la SECRET, despliega como web app
+            (Ejecutar como: yo / Acceso: cualquier persona) y copia la URL aquí arriba.
           </p>
           {showScript && (
             <pre className="code-block">{APPS_SCRIPT_TEMPLATE}</pre>
@@ -1369,11 +1369,11 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, fetchErrors,
         {/* Quick actions */}
         <div className="tile" style={{ padding: 24, marginTop: 20 }}>
           <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6 }}>Atajos</div>
-          <h3 className="display" style={{ fontSize: 28, lineHeight: 1, marginTop: 4, marginBottom: 16 }}>Acciones rÃ¡pidas</h3>
+          <h3 className="display" style={{ fontSize: 28, lineHeight: 1, marginTop: 4, marginBottom: 16 }}>Acciones rápidas</h3>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
             <button onClick={onLoadDemo} className="btn">Cargar datos demo</button>
-            <button onClick={() => { if (confirm('Â¿Borrar cachÃ© local?')) onClearCache(); }} className="btn danger">
-              Borrar cachÃ©
+            <button onClick={() => { if (confirm('¿Borrar caché local?')) onClearCache(); }} className="btn danger">
+              Borrar caché
             </button>
           </div>
         </div>
@@ -1393,19 +1393,19 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, fetchErrors,
 
         <div style={{ marginTop: 32, padding: 20, background: 'rgba(33,57,44,0.04)', borderRadius: 16, fontSize: 13, lineHeight: 1.6, opacity: 0.85 }}>
           <p style={{ marginBottom: 8 }}>
-            <strong style={{ letterSpacing: '0.05em' }}>CÃ³mo funciona.</strong>{' '}
-            La configuraciÃ³n y la cachÃ© se guardan en almacenamiento compartido. Cualquier dispositivo viendo la app
-            verÃ¡ los mismos orÃ­genes y los mismos datos. La vista de kiosco se actualiza automÃ¡ticamente cada 60 segundos.
+            <strong style={{ letterSpacing: '0.05em' }}>Cómo funciona.</strong>{' '}
+            La configuración y la caché se guardan en almacenamiento compartido. Cualquier dispositivo viendo la app
+            verá los mismos orígenes y los mismos datos. La vista de kiosco se actualiza automáticamente cada 60 segundos.
           </p>
           <p style={{ marginBottom: 8 }}>
             <strong style={{ letterSpacing: '0.05em' }}>Match de fuentes.</strong>{' '}
             Mews es la fuente de verdad para las reservas. HubSpot enriquece con el dossier del perro
-            (alergias, patologÃ­as, medicaciÃ³n, dieta) cruzando por <code style={{ background: C.amarillo, padding: '1px 4px', borderRadius: 3, fontSize: 12 }}>email</code>.
-            Si una intake de HubSpot no tiene Mews aÃºn, aparece como <strong>Por confirmar</strong>.
+            (alergias, patologías, medicación, dieta) cruzando por <code style={{ background: C.amarillo, padding: '1px 4px', borderRadius: 3, fontSize: 12 }}>email</code>.
+            Si una intake de HubSpot no tiene Mews aún, aparece como <strong>Por confirmar</strong>.
           </p>
           <p>
             <strong style={{ letterSpacing: '0.05em' }}>Acceso al admin.</strong>{' '}
-            AÃ±ade <code style={{ background: C.amarillo, padding: '1px 4px', borderRadius: 3, fontSize: 12 }}>#admin</code> al final de la URL para volver aquÃ­ desde cualquier dispositivo.
+            Añade <code style={{ background: C.amarillo, padding: '1px 4px', borderRadius: 3, fontSize: 12 }}>#admin</code> al final de la URL para volver aquí desde cualquier dispositivo.
           </p>
         </div>
       </div>
@@ -1462,12 +1462,12 @@ function StatusItem({ label, value }) {
   );
 }
 
-const APPS_SCRIPT_TEMPLATE = `// doggos Â· Sheets â JSON proxy
-// Paste in Extensions â Apps Script of each sheet.
+const APPS_SCRIPT_TEMPLATE = `// doggos · Sheets → JSON proxy
+// Paste in Extensions → Apps Script of each sheet.
 // 1) Change SECRET below.
-// 2) Deploy â New deployment â Web app
-//    Â· Execute as: Me
-//    Â· Who has access: Anyone
+// 2) Deploy → New deployment → Web app
+//    · Execute as: Me
+//    · Who has access: Anyone
 // 3) Copy the /exec URL into the dashboard admin.
 
 const SECRET = "doggos-ops-CHANGE-THIS";
@@ -1483,7 +1483,7 @@ function doGet(e) {
     const data = sheet.getDataRange().getValues();
     if (data.length < 2) return out([]);
 
-    // Disambiguate duplicate headers (e.g. two "DirecciÃ³n" columns)
+    // Disambiguate duplicate headers (e.g. two "Dirección" columns)
     const seen = {};
     const headers = data[0].map(h => {
       const name = String(h).trim();
@@ -1513,4 +1513,3 @@ function out(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }`;
-

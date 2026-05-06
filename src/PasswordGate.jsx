@@ -113,7 +113,7 @@ export default function PasswordGate({ children }) {
             opacity: 0.6,
           }}
         >
-          Operaciones Â· acceso restringido
+          Operaciones · acceso restringido
         </span>
 
         <form onSubmit={submit} style={{ marginTop: 28 }}>
@@ -121,7 +121,7 @@ export default function PasswordGate({ children }) {
             type="password"
             value={input}
             onChange={(e) => { setInput(e.target.value); setError(false); }}
-            placeholder="ContraseÃ±a"
+            placeholder="Contraseña"
             autoFocus
             style={{
               width: '100%',
@@ -139,7 +139,7 @@ export default function PasswordGate({ children }) {
           />
           {error && (
             <div style={{ marginTop: 10, fontSize: 12, color: C.brick, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-              ContraseÃ±a incorrecta
+              Contraseña incorrecta
             </div>
           )}
           <button
