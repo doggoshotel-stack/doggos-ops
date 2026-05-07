@@ -705,6 +705,12 @@ const NAV_ICON = {
       <circle cx="14" cy="15" r="1.5" fill="currentColor" stroke="none" />
     </svg>
   ),
+  inhouse: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+      <path d="M3 17 L3 9 L10 3 L17 9 L17 17 Z" />
+      <path d="M8 17 L8 12 L12 12 L12 17" />
+    </svg>
+  ),
   chevronLeft: (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 3 L4 8 L10 13" /></svg>
   ),
@@ -717,6 +723,7 @@ const NAV_ITEMS = [
   { hash: '#/dashboard',       label: 'Dashboard',    icon: NAV_ICON.dashboard },
   { hash: '#/arrivals/today',  label: 'Llegadas hoy', icon: NAV_ICON.arrivals },
   { hash: '#/departures/today',label: 'Salidas hoy',  icon: NAV_ICON.departures },
+  { hash: '#/inhouse',         label: 'In-House',     icon: NAV_ICON.inhouse },
   { hash: '#/clients',         label: 'Clientes',     icon: NAV_ICON.clients },
   { hash: '#/transports',      label: 'Transportes',  icon: NAV_ICON.transports },
 ];
@@ -835,6 +842,28 @@ function DeparturesTodayView({ merged }) {
         {items.map((r) => (
           <li key={r.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(33, 57, 44, 0.1)', color: C.ink, fontSize: 14 }}>
             <strong>{r.pet || '—'}</strong> · {r.guest} · {r.departure ? `${pad2(r.departure.getHours())}:${pad2(r.departure.getMinutes())}` : '—'}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function InHouseView({ merged }) {
+  const items = useMemo(() => {
+    const t = new Date();
+    return merged
+      .filter((r) => r.arrival && r.departure && r.arrival <= t && r.departure >= t)
+      .sort((a, b) => (a.departure?.getTime() || 0) - (b.departure?.getTime() || 0));
+  }, [merged]);
+  return (
+    <div>
+      <PageHeader title="In-House" subtitle={`${items.length} ${items.length === 1 ? 'perro alojado' : 'perros alojados'}`} />
+      <ComingSoon note="Próximo paso: ficha completa por perro con notas de manejo, dieta y salidas." />
+      <ul style={{ listStyle: 'none', padding: '16px 32px', margin: 0 }}>
+        {items.map((r) => (
+          <li key={r.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(33, 57, 44, 0.1)', color: C.ink, fontSize: 14 }}>
+            <strong>{r.pet || '—'}</strong> · {r.guest} · sale {r.departure ? `${r.departure.getDate()} ${r.departure.toLocaleDateString('es-ES', { month: 'short' }).replace('.', '')}` : '—'}
           </li>
         ))}
       </ul>
@@ -1093,6 +1122,9 @@ export default function App() {
       break;
     case '#/departures/today':
       routeBody = <DeparturesTodayView merged={merged} />;
+      break;
+    case '#/inhouse':
+      routeBody = <InHouseView merged={merged} />;
       break;
     case '#/clients':
       routeBody = <ClientsView merged={merged} pending={pending} />;
