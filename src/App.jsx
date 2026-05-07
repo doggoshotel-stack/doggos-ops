@@ -869,7 +869,7 @@ export default function App() {
   const isAdmin = route === '#admin';
   const [collapsed, setCollapsed] = useState(getInitialSidebarCollapsed);
   const [config, setConfig] = useState(DEFAULT_CONFIG);
-  const [meta, setMeta] = useState({ capacity: 30, lastUpdated: null });
+  const [meta, setMeta] = useState({ capacity: 42, lastUpdated: null });
   const [now, setNow] = useState(new Date());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -1580,25 +1580,19 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, fetchErrors,
           </div>
         </div>
 
-        {/* Capacity */}
-        <div className="tile" style={{ padding: 24, marginTop: 20 }}>
-          <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6 }}>Configuración</div>
-          <h3 className="display" style={{ fontSize: 28, lineHeight: 1, marginTop: 4 }}>Capacidad total</h3>
-          <p style={{ fontSize: 14, opacity: 0.75, marginTop: 8, marginBottom: 16 }}>
-            Número total de plazas para calcular la ocupación.
-          </p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <input
-              type="number"
-              value={capInput}
-              onChange={(e) => setCapInput(Number(e.target.value) || 0)}
-              className="input tabular display"
-              style={{ width: 120, fontSize: 24, textAlign: 'center', padding: 10 }}
-              min={1}
-            />
-            <button onClick={() => onSaveCapacity(capInput)} className="btn celeste">Guardar</button>
-            <span className="eyebrow eyebrow-sm" style={{ opacity: 0.55 }}>Actual: {meta.capacity}</span>
-          </div>
+        {/* Capacity — compact single row */}
+        <div className="tile" style={{ padding: '12px 16px', marginTop: 20, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span className="eyebrow eyebrow-sm" style={{ opacity: 0.7 }}>Capacidad total</span>
+          <input
+            type="number"
+            value={capInput}
+            onChange={(e) => setCapInput(Number(e.target.value) || 0)}
+            className="input tabular"
+            style={{ width: 70, fontSize: 14, textAlign: 'center', padding: '6px 8px' }}
+            min={1}
+          />
+          <button onClick={() => onSaveCapacity(capInput)} className="btn celeste" style={{ padding: '6px 12px', fontSize: 13 }}>Guardar</button>
+          <span className="eyebrow eyebrow-sm" style={{ opacity: 0.5 }}>Actual: {meta.capacity}</span>
         </div>
 
         {/* Apps Script template */}
