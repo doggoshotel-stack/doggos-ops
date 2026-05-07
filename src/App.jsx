@@ -504,9 +504,13 @@ function detectAlerts(record) {
     alerts.push({ type: 'diet', detail: `Prohibido: ${record.prohibitedFoods}` });
   }
 
-  // Transport (structured)
-  if (record.transport) {
-    alerts.push({ type: 'transport', detail: 'Recogida/entrega contratada' });
+  // Transport — read from Mews products (HubSpot transport is stale across bookings)
+  const products = String(record.products || '');
+  const transportLegs = [];
+  if (/transporte\s*ida/i.test(products)) transportLegs.push('Ida');
+  if (/transporte\s*vuelta/i.test(products)) transportLegs.push('Vuelta');
+  if (transportLegs.length > 0) {
+    alerts.push({ type: 'transport', detail: transportLegs.join(' + ') });
   }
 
   // Behavior (keyword scan — no structured field)
@@ -1004,11 +1008,23 @@ function ReservationDetailCard({ r }) {
       </div>
 
       {/* Pills */}
-      <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        {/d[ií]a\s*(de\s*)?guarder/i.test(r.service || '') && (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center',
+            padding: '4px 10px', borderRadius: 999,
+            background: 'rgba(245, 245, 61, 0.4)',
+            color: C.ink,
+            border: `1px solid ${C.amarillo}`,
+            fontSize: 12, fontWeight: 700, letterSpacing: '0.04em',
+          }}>
+            Guardería
+          </span>
+        )}
         <ProductPill label="Transporte" on={hasTransport} />
         <ProductPill label="Otros productos" on={hasOtherProducts} />
         {hasOtherProducts && (
-          <span style={{ fontSize: 12, color: C.ink, opacity: 0.55, alignSelf: 'center' }}>
+          <span style={{ fontSize: 12, color: C.ink, opacity: 0.55 }}>
             ({other.join(', ')})
           </span>
         )}
