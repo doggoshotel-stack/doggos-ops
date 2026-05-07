@@ -1668,6 +1668,10 @@ export default function App() {
 
 function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fetchErrors, isConfigured, onSwitchMode }) {
   const today = todayKey();
+  const tomorrow = useMemo(() => {
+    const d = new Date(); d.setDate(d.getDate() + 1);
+    return dateKey(d);
+  }, [now]);
 
   const arrivalsToday = useMemo(() =>
     merged
@@ -1676,11 +1680,25 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
     [merged, today]
   );
 
+  const arrivalsTomorrow = useMemo(() =>
+    merged
+      .filter((r) => dateKey(r.arrival) === tomorrow)
+      .sort((a, b) => (a.arrival?.getTime() || 0) - (b.arrival?.getTime() || 0)),
+    [merged, tomorrow]
+  );
+
   const departuresToday = useMemo(() =>
     merged
       .filter((r) => dateKey(r.departure) === today)
       .sort((a, b) => (a.departure?.getTime() || 0) - (b.departure?.getTime() || 0)),
     [merged, today]
+  );
+
+  const departuresTomorrow = useMemo(() =>
+    merged
+      .filter((r) => dateKey(r.departure) === tomorrow)
+      .sort((a, b) => (a.departure?.getTime() || 0) - (b.departure?.getTime() || 0)),
+    [merged, tomorrow]
   );
 
   const inHouse = useMemo(() => {
@@ -1789,17 +1807,53 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
 
       {/* Four columns */}
       <main style={{ flex: 1, padding: '20px 32px 100px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, minHeight: 0 }}>
-        <Column title="Llegadas hoy" eyebrow="Check-in" count={arrivalsToday.length}>
-          {arrivalsToday.length === 0
-            ? <Empty>Sin llegadas previstas hoy</Empty>
-            : arrivalsToday.map((r) => <GuestRow key={r.id} r={r} time={r.arrival} variant="arrival" />)}
-        </Column>
+        <TabbedColumn
+          eyebrow="Check-in"
+          tabs={[
+            {
+              key: 'today',
+              label: 'Hoy',
+              title: 'Llegadas hoy',
+              count: arrivalsToday.length,
+              content: arrivalsToday.length === 0
+                ? <Empty>Sin llegadas previstas hoy</Empty>
+                : arrivalsToday.map((r) => <GuestRow key={r.id} r={r} time={r.arrival} variant="arrival" />),
+            },
+            {
+              key: 'tomorrow',
+              label: 'Mañana',
+              title: 'Llegadas mañana',
+              count: arrivalsTomorrow.length,
+              content: arrivalsTomorrow.length === 0
+                ? <Empty>Sin llegadas previstas mañana</Empty>
+                : arrivalsTomorrow.map((r) => <GuestRow key={r.id} r={r} time={r.arrival} variant="arrival" />),
+            },
+          ]}
+        />
 
-        <Column title="Salidas hoy" eyebrow="Check-out" count={departuresToday.length}>
-          {departuresToday.length === 0
-            ? <Empty>Sin salidas previstas hoy</Empty>
-            : departuresToday.map((r) => <GuestRow key={r.id} r={r} time={r.departure} variant="departure" />)}
-        </Column>
+        <TabbedColumn
+          eyebrow="Check-out"
+          tabs={[
+            {
+              key: 'today',
+              label: 'Hoy',
+              title: 'Salidas hoy',
+              count: departuresToday.length,
+              content: departuresToday.length === 0
+                ? <Empty>Sin salidas previstas hoy</Empty>
+                : departuresToday.map((r) => <GuestRow key={r.id} r={r} time={r.departure} variant="departure" />),
+            },
+            {
+              key: 'tomorrow',
+              label: 'Mañana',
+              title: 'Salidas mañana',
+              count: departuresTomorrow.length,
+              content: departuresTomorrow.length === 0
+                ? <Empty>Sin salidas previstas mañana</Empty>
+                : departuresTomorrow.map((r) => <GuestRow key={r.id} r={r} time={r.departure} variant="departure" />),
+            },
+          ]}
+        />
 
         <Column title="In-House" eyebrow="Durmiendo" count={inHouse.length}>
           {inHouse.length === 0
@@ -2142,6 +2196,51 @@ function Column({ title, eyebrow, count, children }) {
       </header>
       <div style={{ flex: 1, overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {children}
+      </div>
+    </section>
+  );
+}
+
+function TabbedColumn({ eyebrow, tabs }) {
+  const [activeKey, setActiveKey] = useState(tabs[0]?.key);
+  const active = tabs.find((t) => t.key === activeKey) || tabs[0];
+  return (
+    <section className="tile" style={{ minHeight: 0 }}>
+      <header style={{ padding: '14px 18px 12px', borderBottom: `1.5px solid ${C.ink}`, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span className="eyebrow eyebrow-sm" style={{ opacity: 0.6 }}>{eyebrow}</span>
+            <h2 className="display" style={{ fontSize: 28, lineHeight: 1 }}>{active.title}</h2>
+          </div>
+          <span className="pastilla outline tabular">{active.count}</span>
+        </div>
+        <div style={{ display: 'inline-flex', alignSelf: 'flex-start', borderRadius: 999, border: `1.5px solid ${C.ink}`, padding: 2, gap: 2 }}>
+          {tabs.map((t) => {
+            const isActive = t.key === activeKey;
+            return (
+              <button
+                key={t.key}
+                onClick={() => setActiveKey(t.key)}
+                className="eyebrow eyebrow-sm"
+                style={{
+                  border: 'none', cursor: 'pointer',
+                  padding: '5px 12px', borderRadius: 999,
+                  background: isActive ? C.ink : 'transparent',
+                  color: isActive ? C.cream : C.ink,
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  fontSize: 10,
+                  transition: 'background 160ms ease, color 160ms ease',
+                }}
+              >
+                {t.label}
+                <span className="tabular" style={{ opacity: 0.7, fontSize: 10 }}>{t.count}</span>
+              </button>
+            );
+          })}
+        </div>
+      </header>
+      <div style={{ flex: 1, overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {active.content}
       </div>
     </section>
   );
