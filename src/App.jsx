@@ -1199,21 +1199,25 @@ function InHouseView({ merged }) {
   );
 }
 
-function ClientsView({ merged, pending }) {
+function ClientsView({ hubspot, merged, pending }) {
   const [query, setQuery] = useState('');
   const unique = useMemo(() => {
-    const fromMerged = merged.filter((r) => r._hubspot).map((r) => r._hubspot);
-    const all = [...fromMerged, ...pending];
+    // Primary source: every parsed HubSpot row, regardless of arrival date.
+    // Falls back to merged + pending if hubspot prop is missing (warm cache before refresh).
+    const source = (hubspot && hubspot.length > 0)
+      ? hubspot
+      : [...merged.filter((r) => r._hubspot).map((r) => r._hubspot), ...pending];
     const map = new Map();
-    for (const h of all) {
-      if (!h.id) continue;
-      const existing = map.get(h.id);
+    let anonymous = 0;
+    for (const h of source) {
+      const key = h.id || `anon-${anonymous++}`;
+      const existing = map.get(key);
       if (!existing || (h.submittedAt?.getTime() || 0) > (existing.submittedAt?.getTime() || 0)) {
-        map.set(h.id, h);
+        map.set(key, h);
       }
     }
     return Array.from(map.values()).sort((a, b) => (b.submittedAt?.getTime() || 0) - (a.submittedAt?.getTime() || 0));
-  }, [merged, pending]);
+  }, [hubspot, merged, pending]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -1599,6 +1603,7 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [merged, setMerged] = useState([]);
   const [pending, setPending] = useState([]);
+  const [hubspot, setHubspot] = useState([]);
   const [calendlyEvents, setCalendlyEvents] = useState([]);
   const [fetchErrors, setFetchErrors] = useState({ mews: null, hubspot: null, calendly: null });
 
@@ -1624,6 +1629,13 @@ export default function App() {
         }));
         setMerged(rehydrated);
         setPending(cache.pending || []);
+        const hubRehydrated = (cache.hubspot || []).map((h) => ({
+          ...h,
+          arrival: h.arrival ? new Date(h.arrival) : null,
+          departure: h.departure ? new Date(h.departure) : null,
+          submittedAt: h.submittedAt ? new Date(h.submittedAt) : null,
+        }));
+        setHubspot(hubRehydrated);
         const calRehydrated = (cache.calendly || []).map((e) => ({
           ...e,
           time: e.time ? new Date(e.time) : null,
@@ -1670,11 +1682,12 @@ export default function App() {
     const { merged: mergedRows, pending: pendingRows } = mergeReservations(mewsRows, hubspotRows);
     setMerged(mergedRows);
     setPending(pendingRows);
+    setHubspot(hubspotRows);
     setCalendlyEvents(calendlyRows);
     setFetchErrors(errors);
 
     // Save to cache for resilience
-    if (mergedRows.length > 0 || pendingRows.length > 0 || calendlyRows.length > 0) {
+    if (mergedRows.length > 0 || pendingRows.length > 0 || hubspotRows.length > 0 || calendlyRows.length > 0) {
       const cache = {
         merged: mergedRows.map((r) => ({
           ...r,
@@ -1684,6 +1697,12 @@ export default function App() {
           _hubspot: undefined,
         })),
         pending: pendingRows.map((p) => ({ guest: p.guest, pet: p.pet, arrival: p.arrival?.toISOString(), email: p.email })),
+        hubspot: hubspotRows.map((h) => ({
+          ...h,
+          arrival: h.arrival?.toISOString() || null,
+          departure: h.departure?.toISOString() || null,
+          submittedAt: h.submittedAt?.toISOString() || null,
+        })),
         calendly: calendlyRows.map((e) => ({
           ...e,
           time: e.time?.toISOString() || null,
@@ -1822,7 +1841,7 @@ export default function App() {
       routeBody = <InHouseView merged={merged} />;
       break;
     case '#/clients':
-      routeBody = <ClientsView merged={merged} pending={pending} />;
+      routeBody = <ClientsView hubspot={hubspot} merged={merged} pending={pending} />;
       break;
     case '#/transports':
       routeBody = <TransportsView merged={merged} />;
