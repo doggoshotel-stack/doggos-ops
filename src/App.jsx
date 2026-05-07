@@ -181,11 +181,22 @@ const dateKey = (d) => {
   if (isNaN(x.getTime())) return null;
   return `${x.getFullYear()}-${pad2(x.getMonth() + 1)}-${pad2(x.getDate())}`;
 };
+const SHEET_ERR_RE = /^#(REF|N\/A|VALUE|NAME|NUM|DIV\/0|ERROR|NULL|GETTING_DATA|SPILL)[!?]?$/i;
+const sanitizeText = (v) => {
+  if (v == null) return '';
+  const s = String(v).trim();
+  if (!s || SHEET_ERR_RE.test(s)) return '';
+  return s;
+};
+const MONTH_NAMES = {
+  ene:0, jan:0, feb:1, mar:2, abr:3, apr:3, may:4,
+  jun:5, jul:6, ago:7, aug:7, sep:8, oct:9, nov:10, dic:11, dec:11,
+};
 const parseDate = (v) => {
   if (!v) return null;
   if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
   const s = String(v).trim();
-  if (!s) return null;
+  if (!s || SHEET_ERR_RE.test(s)) return null;
   const iso = new Date(s);
   if (!isNaN(iso.getTime())) return iso;
   // DD/MM/YYYY or DD-MM-YYYY
@@ -195,6 +206,17 @@ const parseDate = (v) => {
     const yr = y.length === 2 ? 2000 + Number(y) : Number(y);
     const dt = new Date(yr, Number(mo) - 1, Number(d), Number(h || 0), Number(min || 0));
     if (!isNaN(dt.getTime())) return dt;
+  }
+  // Calendly format: "HH:MM - <weekday>, DD <Month> YYYY (timezone)"
+  const cal = s.match(/^(\d{1,2}):(\d{2})\s*-\s*\w+,?\s*(\d{1,2})\s+(\w+)\s+(\d{4})/i);
+  if (cal) {
+    const [, h, min, day, monStr, year] = cal;
+    const monKey = monStr.slice(0, 3).toLowerCase();
+    const month = MONTH_NAMES[monKey];
+    if (month != null) {
+      const dt = new Date(Number(year), month, Number(day), Number(h), Number(min));
+      if (!isNaN(dt.getTime())) return dt;
+    }
   }
   return null;
 };
@@ -230,7 +252,24 @@ const normName = (v) =>
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-const eur = (n) => `€${Math.round(n).toLocaleString('es-ES')}`;
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  if (!a || !b) return Math.max((a || '').length, (b || '').length);
+  if (Math.abs(a.length - b.length) > 2) return 99;
+  const n = b.length;
+  const dp = new Array(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
 const pct = (n) => `${Math.round(n)}%`;
 const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
 
@@ -278,6 +317,7 @@ function parseHubSpotRow(row) {
     guest: `${row.Nombre || ''} ${row.Apellidos || ''}`.trim(),
     email: normEmail(row.Correo || row['Contact email']),
     phone: row['Número de teléfono de WhatsApp'] || '',
+    address: sanitizeText(row.Dirección),
     pickup: row['Persona autorizada para recogida/entrega'] || '',
     pet: row['Nombre del perro'] || '',
     breed: row.Raza || '',
@@ -325,7 +365,7 @@ function parseHubSpotRow(row) {
 /* ----------------------- merge ----------------------- */
 
 function mergeReservations(mewsList, hubspotList) {
-  // Index HubSpot by email (most recent submission wins)
+  // Index HubSpot by email and by normalized name (most recent submission wins).
   const hubByEmail = new Map();
   const hubByName = new Map();
   for (const h of hubspotList) {
@@ -343,9 +383,32 @@ function mergeReservations(mewsList, hubspotList) {
       }
     }
   }
+  const hubNamesArr = Array.from(hubByName.entries()); // [name, record][] for fuzzy fallback
 
   const merged = mewsList.map((m) => {
-    const h = (m.email && hubByEmail.get(m.email)) || hubByName.get(normName(m.guest)) || null;
+    let h = null;
+    let confidence = 'none';
+    if (m.email && hubByEmail.has(m.email)) {
+      h = hubByEmail.get(m.email);
+      confidence = 'high';
+    } else {
+      const mNorm = normName(m.guest);
+      if (mNorm && hubByName.has(mNorm)) {
+        h = hubByName.get(mNorm);
+        confidence = 'medium';
+      } else if (mNorm) {
+        let best = null;
+        let bestDist = 3;
+        for (const [hubName, hubRec] of hubNamesArr) {
+          const d = levenshtein(mNorm, hubName);
+          if (d < bestDist) { bestDist = d; best = hubRec; }
+        }
+        if (best && bestDist <= 2) {
+          h = best;
+          confidence = 'low';
+        }
+      }
+    }
     return {
       ...m,
       pet: h?.pet || '',
@@ -354,33 +417,45 @@ function mergeReservations(mewsList, hubspotList) {
       weight: h?.weight || '',
       sex: h?.sex || '',
       age: h?.age || '',
+      address: h?.address || '',
+      phone: h?.phone || '',
+      sterilized: h?.sterilized,
       transport: h?.transport || false,
       allergies: h?.allergies || [],
       pathologies: h?.pathologies || [],
       medications: h?.medications || [],
       medicalNotes: h?.medicalNotes || '',
+      foodType: h?.foodType || '',
       foodBrand: h?.foodBrand || '',
       foodAmount: h?.foodAmount || '',
+      foodFrequency: h?.foodFrequency || '',
       foodSchedule: h?.foodSchedule || '',
+      treats: h?.treats || '',
       prohibitedFoods: h?.prohibitedFoods || '',
+      supplements: h?.supplements || '',
       rituals: h?.rituals || '',
       vetClinic: h?.vetClinic || '',
       vetPhone: h?.vetPhone || '',
       emergency1: h?.emergency1 || '',
       emergency2: h?.emergency2 || '',
+      submittedAt: h?.submittedAt || null,
       hubspotId: h?.id || null,
       _hasHubspot: !!h,
+      _matchConfidence: confidence,
       _hubspot: h || null,
     };
   });
 
-  // HubSpot records WITHOUT a Mews booking that have a future check-in date
+  // Pending: HubSpot records that didn't match any Mews booking and have a future check-in.
+  const matchedHubIds = new Set(merged.filter((r) => r._hubspot).map((r) => r._hubspot.id));
   const matchedEmails = new Set(merged.filter((r) => r._hasHubspot && r.email).map((r) => r.email));
   const matchedNames = new Set(merged.filter((r) => r._hasHubspot).map((r) => normName(r.guest)));
   const now = new Date();
   const pending = hubspotList.filter((h) => {
-    const matched = (h.email && matchedEmails.has(h.email)) || matchedNames.has(normName(h.guest));
-    return !matched && h.arrival && h.arrival >= now;
+    if (matchedHubIds.has(h.id)) return false;
+    if (h.email && matchedEmails.has(h.email)) return false;
+    if (matchedNames.has(normName(h.guest))) return false;
+    return h.arrival && h.arrival >= now;
   });
 
   return { merged, pending };
@@ -389,13 +464,14 @@ function mergeReservations(mewsList, hubspotList) {
 /* ----------------------- structured alerts ----------------------- */
 
 const ALERT_STYLES = {
-  medical:   { label: 'Médico',     pastilla: 'pastilla',         tint: 'amarillo-tint', priority: 0 },
-  allergy:   { label: 'Alergia',    pastilla: 'pastilla',         tint: 'amarillo-tint', priority: 1 },
-  pathology: { label: 'Patología',  pastilla: 'pastilla ocre',    tint: 'amarillo-tint', priority: 2 },
-  behavior:  { label: 'Manejo',     pastilla: 'pastilla ocre',    tint: '',              priority: 3 },
-  diet:      { label: 'Dieta',      pastilla: 'pastilla celeste', tint: 'celeste-tint',  priority: 4 },
-  transport: { label: 'Transporte', pastilla: 'pastilla celeste', tint: '',              priority: 5 },
-  vip:       { label: 'VIP',        pastilla: 'pastilla lila',    tint: '',              priority: 6 },
+  medical:   { label: 'Médico',          pastilla: 'pastilla',         tint: 'amarillo-tint', priority: 0 },
+  allergy:   { label: 'Alergia',         pastilla: 'pastilla',         tint: 'amarillo-tint', priority: 1 },
+  pathology: { label: 'Patología',       pastilla: 'pastilla ocre',    tint: 'amarillo-tint', priority: 2 },
+  neutered:  { label: 'No esterilizado', pastilla: 'pastilla ocre',    tint: '',              priority: 3 },
+  behavior:  { label: 'Manejo',          pastilla: 'pastilla ocre',    tint: '',              priority: 4 },
+  diet:      { label: 'Dieta',           pastilla: 'pastilla celeste', tint: 'celeste-tint',  priority: 5 },
+  transport: { label: 'Transporte',      pastilla: 'pastilla celeste', tint: '',              priority: 6 },
+  vip:       { label: 'VIP',             pastilla: 'pastilla lila',    tint: '',              priority: 7 },
 };
 
 function detectAlerts(record) {
@@ -416,6 +492,11 @@ function detectAlerts(record) {
   // Pathologies (structured)
   if (record.pathologies?.length > 0) {
     alerts.push({ type: 'pathology', detail: record.pathologies.join(', ') });
+  }
+
+  // Not neutered — only fires when we have HubSpot data that explicitly says no
+  if (record._hasHubspot && record.sterilized === false) {
+    alerts.push({ type: 'neutered', detail: 'Sin esterilizar' });
   }
 
   // Diet (structured)
@@ -632,8 +713,8 @@ function parseCalendlyRow(row, idx) {
     eventName,
     host: row.host || '',
     time: parseDate(row.event_time_raw),
-    location: row.location || '',
-    meetingUrl: row.meeting_url || '',
+    location: sanitizeText(row.location),
+    meetingUrl: sanitizeText(row.meeting_url),
     invitee: row.invitee_name || '',
     email: normEmail(row.invitee_email),
     customQuestions: row.custom_questions || '',
@@ -642,12 +723,668 @@ function parseCalendlyRow(row, idx) {
   };
 }
 
-export default function App() {
-  const [mode, setMode] = useState(() =>
-    typeof window !== 'undefined' && window.location.hash === '#admin' ? 'admin' : 'kiosk'
+/* ----------------------- routing + layout ----------------------- */
+
+const SIDEBAR_COLLAPSED_KEY = 'doggos_sidebar_collapsed';
+
+function getRoute() {
+  if (typeof window === 'undefined') return '#/dashboard';
+  const h = window.location.hash;
+  if (h === '#admin') return '#admin';
+  if (!h || h === '#' || h === '#/') return '#/dashboard';
+  return h;
+}
+
+function navigate(hash) {
+  if (typeof window !== 'undefined') window.location.hash = hash;
+}
+
+function useRoute() {
+  const [route, setRoute] = useState(getRoute);
+  useEffect(() => {
+    const onChange = () => setRoute(getRoute());
+    window.addEventListener('hashchange', onChange);
+    return () => window.removeEventListener('hashchange', onChange);
+  }, []);
+  return route;
+}
+
+function getInitialSidebarCollapsed() {
+  if (typeof window === 'undefined') return false;
+  try {
+    const stored = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+    if (stored !== null) return stored === 'true';
+  } catch {}
+  return window.innerWidth < 1100;
+}
+
+const NAV_ICON = {
+  dashboard: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <rect x="2.5" y="2.5" width="6" height="6" /><rect x="11.5" y="2.5" width="6" height="6" />
+      <rect x="2.5" y="11.5" width="6" height="6" /><rect x="11.5" y="11.5" width="6" height="6" />
+    </svg>
+  ),
+  arrivals: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M2 10 L12 10 M9 7 L12 10 L9 13" /><rect x="14" y="3" width="4" height="14" />
+    </svg>
+  ),
+  departures: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <rect x="2" y="3" width="4" height="14" /><path d="M8 10 L18 10 M15 7 L18 10 L15 13" />
+    </svg>
+  ),
+  clients: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="10" cy="6.5" r="3" /><path d="M3.5 17.5 C3.5 13.5 6.5 11.5 10 11.5 C13.5 11.5 16.5 13.5 16.5 17.5" />
+    </svg>
+  ),
+  transports: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <rect x="1.5" y="6" width="13" height="7.5" /><path d="M14.5 8 L18.5 8 L18.5 13.5 L14.5 13.5" />
+      <circle cx="6" cy="15" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="14" cy="15" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  inhouse: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+      <path d="M3 17 L3 9 L10 3 L17 9 L17 17 Z" />
+      <path d="M8 17 L8 12 L12 12 L12 17" />
+    </svg>
+  ),
+  chevronLeft: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 3 L4 8 L10 13" /></svg>
+  ),
+  chevronRight: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 3 L12 8 L6 13" /></svg>
+  ),
+};
+
+const NAV_ITEMS = [
+  { hash: '#/dashboard',       label: 'Dashboard',    icon: NAV_ICON.dashboard },
+  { hash: '#/arrivals/today',  label: 'Llegadas hoy', icon: NAV_ICON.arrivals },
+  { hash: '#/departures/today',label: 'Salidas hoy',  icon: NAV_ICON.departures },
+  { hash: '#/inhouse',         label: 'In-House',     icon: NAV_ICON.inhouse },
+  { hash: '#/clients',         label: 'Clientes',     icon: NAV_ICON.clients },
+  { hash: '#/transports',      label: 'Transportes',  icon: NAV_ICON.transports },
+];
+
+function Sidebar({ route, collapsed, onToggle }) {
+  const W = collapsed ? 64 : 220;
+  return (
+    <aside style={{
+      position: 'fixed', left: 0, top: 0, bottom: 0,
+      width: W, background: C.ink, color: C.cream,
+      display: 'flex', flexDirection: 'column',
+      transition: 'width 200ms ease',
+      zIndex: 50, overflow: 'hidden',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center',
+        justifyContent: collapsed ? 'center' : 'space-between',
+        padding: collapsed ? '20px 0' : '20px 14px 20px 20px',
+        borderBottom: '1px solid rgba(234, 232, 221, 0.15)',
+        minHeight: 60,
+      }}>
+        {!collapsed && (
+          <span className="display" style={{ fontSize: 22, color: C.cream, lineHeight: 1 }}>doggos</span>
+        )}
+        <button
+          onClick={onToggle}
+          aria-label={collapsed ? 'Expandir menú' : 'Colapsar menú'}
+          style={{
+            background: 'transparent', border: 'none', color: C.cream,
+            cursor: 'pointer', padding: 6, borderRadius: 4,
+            display: 'flex', alignItems: 'center',
+          }}
+        >
+          {collapsed ? NAV_ICON.chevronRight : NAV_ICON.chevronLeft}
+        </button>
+      </div>
+      <nav style={{ display: 'flex', flexDirection: 'column', padding: '12px 8px', gap: 4, flex: 1 }}>
+        {NAV_ITEMS.map((item) => {
+          const active = route === item.hash;
+          return (
+            <button
+              key={item.hash}
+              onClick={() => navigate(item.hash)}
+              title={collapsed ? item.label : undefined}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: collapsed ? '12px 0' : '10px 12px',
+                justifyContent: collapsed ? 'center' : 'flex-start',
+                background: active ? C.amarillo : 'transparent',
+                color: active ? C.ink : C.cream,
+                border: 'none', borderRadius: 8,
+                cursor: 'pointer', fontSize: 14, fontWeight: 500,
+                whiteSpace: 'nowrap', overflow: 'hidden',
+                fontFamily: 'inherit', textAlign: 'left', width: '100%',
+              }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', flex: 'none' }}>{item.icon}</span>
+              {!collapsed && <span>{item.label}</span>}
+            </button>
+          );
+        })}
+      </nav>
+    </aside>
   );
+}
+
+function PageHeader({ title, subtitle }) {
+  return (
+    <header style={{ padding: '32px 32px 16px' }}>
+      <h1 className="display" style={{ fontSize: 36, color: C.ink, margin: 0, lineHeight: 1 }}>{title}</h1>
+      {subtitle && (
+        <div className="eyebrow eyebrow-sm" style={{ color: C.ink, opacity: 0.6, marginTop: 6 }}>{subtitle}</div>
+      )}
+    </header>
+  );
+}
+
+function ComingSoon({ note }) {
+  return (
+    <div style={{ margin: '0 32px', padding: 24, borderRadius: 12, background: 'rgba(33, 57, 44, 0.06)', color: C.ink, fontSize: 14 }}>
+      Vista en construcción. {note}
+    </div>
+  );
+}
+
+/* ----------------------- detail card (arrivals/departures/in-house) ----------------------- */
+
+const WEEKDAY_ES = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+const MONTH_ES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+function fmtDateTime(d) {
+  if (!d) return '—';
+  const wd = WEEKDAY_ES[d.getDay()];
+  const day = d.getDate();
+  const mo = MONTH_ES[d.getMonth()];
+  const yr = d.getFullYear();
+  const hh = pad2(d.getHours());
+  const mm = pad2(d.getMinutes());
+  return `${wd} ${day} ${mo} ${yr}, ${hh}:${mm}`;
+}
+
+function splitProducts(productsStr) {
+  const items = String(productsStr || '')
+    .split(/[,;\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const transports = items.filter((s) => /^transporte/i.test(s));
+  const other = items.filter((s) => !/^transporte/i.test(s));
+  return { transports, other };
+}
+
+const CONFIDENCE_LABEL = { high: 'alto', medium: 'medio', low: 'bajo', none: 'sin match' };
+const CONFIDENCE_COLOR = { high: C.ocre, medium: C.celeste, low: C.lila, none: C.brick };
+
+function MetaCell({ label, value }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div className="eyebrow eyebrow-sm" style={{ color: C.ink, opacity: 0.55, marginBottom: 2 }}>{label}</div>
+      <div style={{ color: C.ink, fontWeight: 600, fontSize: 14, lineHeight: 1.3 }}>{value || '—'}</div>
+    </div>
+  );
+}
+
+function ProductPill({ label, on }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center',
+      padding: '4px 10px', borderRadius: 999,
+      background: on ? 'rgba(120, 217, 216, 0.25)' : 'rgba(33, 57, 44, 0.06)',
+      color: on ? C.ink : 'rgba(33, 57, 44, 0.5)',
+      border: `1px solid ${on ? C.celeste : 'rgba(33, 57, 44, 0.15)'}`,
+      fontSize: 12, fontWeight: 600,
+    }}>
+      {label}: {on ? 'Sí' : 'No'}
+    </span>
+  );
+}
+
+function ReservationDetailCard({ r }) {
+  const { transports, other } = splitProducts(r.products);
+  const hasTransport = transports.length > 0;
+  const hasOtherProducts = other.length > 0;
+  const hasNotes = !!(r.notes && r.notes.trim());
+  const hasHubspot = !!r._hasHubspot;
+  const confidence = r._matchConfidence || 'none';
+  const profileMeta = [
+    r.breed && ['Raza', r.breed],
+    r.size && ['Tamaño', r.size],
+    r.sex && ['Sexo', r.sex],
+    r.age && ['Edad', r.age],
+    r.weight && ['Peso (kg)', r.weight],
+  ].filter(Boolean);
+  const foodLines = [
+    r.foodType && ['Tipo', r.foodType],
+    r.foodBrand && ['Marca', r.foodBrand],
+    r.foodAmount && ['Cantidad diaria', r.foodAmount + (/\bg\b|gram/i.test(r.foodAmount) ? '' : ' g')],
+    r.foodFrequency && ['Frecuencia', r.foodFrequency],
+    r.foodSchedule && ['Horario', r.foodSchedule],
+    r.treats && ['Premios', r.treats],
+  ].filter(Boolean);
+  const allergiesText = r.allergies?.length > 0 ? r.allergies.join(', ') : 'Ninguna';
+  const conditionsText = r.pathologies?.length > 0 ? r.pathologies.join(', ') : 'Ninguna';
+  const neuteredText = r.sterilized === true ? 'Sí' : r.sterilized === false ? 'No' : '—';
+  const vetParts = [
+    r.vetClinic && ['Vet', r.vetClinic],
+    r.vetPhone && ['Tel.', r.vetPhone],
+    r.emergency1 && ['Emergencia 1', r.emergency1],
+    r.emergency2 && ['Emergencia 2', r.emergency2],
+  ].filter(Boolean);
+
+  return (
+    <article style={{
+      background: C.cream, color: C.ink,
+      border: `1px solid rgba(33, 57, 44, 0.15)`,
+      borderRadius: 14, padding: 22, marginBottom: 16,
+    }}>
+      {/* Title row */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 12 }}>
+        <h2 className="display" style={{ fontSize: 30, lineHeight: 1, margin: 0, letterSpacing: '0.02em' }}>
+          {(r.pet || r.guest || '—').toUpperCase()}
+        </h2>
+        <div style={{ fontSize: 14, opacity: 0.75 }}>
+          <span style={{ opacity: 0.6 }}>Dueño:</span> <strong>{r.guest || '—'}</strong>
+        </div>
+      </div>
+
+      {/* Meta cells */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+        gap: 16, marginTop: 14,
+      }}>
+        <MetaCell label="Entrada" value={fmtDateTime(r.arrival)} />
+        <MetaCell label="Salida" value={fmtDateTime(r.departure)} />
+        <MetaCell label="Habitación" value={r.spaceType} />
+        <MetaCell label="Reserva nº" value={r.confirmation} />
+      </div>
+
+      {/* Pills */}
+      <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+        <ProductPill label="Transporte" on={hasTransport} />
+        <ProductPill label="Otros productos" on={hasOtherProducts} />
+        {hasOtherProducts && (
+          <span style={{ fontSize: 12, color: C.ink, opacity: 0.55, alignSelf: 'center' }}>
+            ({other.join(', ')})
+          </span>
+        )}
+      </div>
+
+      {/* Booking notes (Mews) */}
+      {hasNotes && (
+        <div style={{
+          marginTop: 14, padding: '10px 14px',
+          background: 'rgba(245, 245, 61, 0.35)',
+          borderLeft: `3px solid ${C.ink}`,
+          borderRadius: 4, fontSize: 13.5, lineHeight: 1.4,
+        }}>
+          <strong>Notas de reserva (Mews):</strong> {r.notes}
+        </div>
+      )}
+
+      {/* Dog profile (HubSpot) */}
+      {hasHubspot ? (
+        <div style={{
+          marginTop: 14, padding: 16,
+          background: 'rgba(120, 217, 216, 0.13)',
+          border: '1px solid rgba(120, 217, 216, 0.5)',
+          borderRadius: 10,
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+            <strong style={{ fontSize: 15 }}>Ficha del perro</strong>
+            <span style={{ fontSize: 11, color: CONFIDENCE_COLOR[confidence], fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+              match HubSpot: {CONFIDENCE_LABEL[confidence]}
+            </span>
+          </div>
+
+          {profileMeta.length > 0 && (
+            <div style={{ fontSize: 13.5, marginBottom: 10 }}>
+              {profileMeta.map(([k, v], i) => (
+                <span key={k}>
+                  {i > 0 && <span style={{ opacity: 0.4, margin: '0 6px' }}>·</span>}
+                  <span style={{ opacity: 0.6 }}>{k}:</span> <strong>{v}</strong>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {foodLines.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <strong style={{ fontSize: 13.5 }}>Alimentación</strong>
+              <ul style={{ margin: '4px 0 0 18px', padding: 0, fontSize: 13 }}>
+                {foodLines.map(([k, v]) => (
+                  <li key={k}><span style={{ opacity: 0.65 }}>{k}:</span> {v}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div style={{
+            marginTop: 12, padding: '8px 12px',
+            background: 'rgba(162, 58, 42, 0.08)',
+            border: '1px solid rgba(162, 58, 42, 0.3)',
+            borderRadius: 6,
+          }}>
+            <div style={{ fontSize: 12, color: C.brick, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Alergias</div>
+            <div style={{ fontSize: 13.5 }}>{allergiesText}</div>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <strong style={{ fontSize: 13.5 }}>A vigilar</strong>
+            <ul style={{ margin: '4px 0 0 18px', padding: 0, fontSize: 13 }}>
+              <li><span style={{ opacity: 0.65 }}>Patologías:</span> {conditionsText}</li>
+              <li><span style={{ opacity: 0.65 }}>Esterilizado:</span> {neuteredText}</li>
+              {r.medicalNotes && <li><span style={{ opacity: 0.65 }}>Notas médicas:</span> {r.medicalNotes}</li>}
+              {r.prohibitedFoods && <li><span style={{ opacity: 0.65 }}>Alimentos prohibidos:</span> {r.prohibitedFoods}</li>}
+              {r.rituals && <li><span style={{ opacity: 0.65 }}>Rituales:</span> {r.rituals}</li>}
+            </ul>
+          </div>
+
+          {vetParts.length > 0 && (
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(33, 57, 44, 0.1)', fontSize: 12.5, opacity: 0.85 }}>
+              {vetParts.map(([k, v], i) => (
+                <span key={k}>
+                  {i > 0 && <span style={{ opacity: 0.4, margin: '0 6px' }}>·</span>}
+                  <span style={{ opacity: 0.6 }}>{k}:</span> {v}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {r.submittedAt && (
+            <div style={{ marginTop: 8, fontSize: 11, opacity: 0.55, fontStyle: 'italic' }}>
+              Formulario enviado: {fmtDateTime(r.submittedAt)}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{
+          marginTop: 14, padding: '12px 14px',
+          background: 'rgba(162, 58, 42, 0.08)',
+          border: `1px dashed ${C.brick}`,
+          borderRadius: 8, fontSize: 13.5, color: C.ink,
+        }}>
+          <strong style={{ color: C.brick }}>Sin ficha HubSpot.</strong>{' '}
+          Pedir al cliente que rellene el formulario de admisión antes de la entrada.
+        </div>
+      )}
+    </article>
+  );
+}
+
+function CardList({ items, emptyText }) {
+  if (items.length === 0) {
+    return (
+      <div style={{
+        margin: '0 32px', padding: 28,
+        background: 'rgba(33, 57, 44, 0.04)',
+        borderRadius: 12, color: C.ink, opacity: 0.65,
+        fontSize: 14, textAlign: 'center',
+      }}>
+        {emptyText}
+      </div>
+    );
+  }
+  return (
+    <div style={{ padding: '0 32px 60px' }}>
+      {items.map((r) => <ReservationDetailCard key={r.id} r={r} />)}
+    </div>
+  );
+}
+
+function ArrivalsTodayView({ merged }) {
+  const today = todayKey();
+  const items = useMemo(() =>
+    merged
+      .filter((r) => dateKey(r.arrival) === today)
+      .sort((a, b) => (a.arrival?.getTime() || 0) - (b.arrival?.getTime() || 0)),
+    [merged, today]
+  );
+  return (
+    <div>
+      <PageHeader title="Llegadas hoy" subtitle={`${items.length} ${items.length === 1 ? 'reserva' : 'reservas'}`} />
+      <CardList items={items} emptyText="Sin llegadas previstas hoy." />
+    </div>
+  );
+}
+
+function DeparturesTodayView({ merged }) {
+  const today = todayKey();
+  const items = useMemo(() =>
+    merged
+      .filter((r) => dateKey(r.departure) === today)
+      .sort((a, b) => (a.departure?.getTime() || 0) - (b.departure?.getTime() || 0)),
+    [merged, today]
+  );
+  return (
+    <div>
+      <PageHeader title="Salidas hoy" subtitle={`${items.length} ${items.length === 1 ? 'reserva' : 'reservas'}`} />
+      <CardList items={items} emptyText="Sin salidas previstas hoy." />
+    </div>
+  );
+}
+
+function InHouseView({ merged }) {
+  const items = useMemo(() => {
+    const t = new Date();
+    return merged
+      .filter((r) => r.arrival && r.departure && r.arrival <= t && r.departure >= t)
+      .sort((a, b) => (a.departure?.getTime() || 0) - (b.departure?.getTime() || 0));
+  }, [merged]);
+  return (
+    <div>
+      <PageHeader title="In-House" subtitle={`${items.length} ${items.length === 1 ? 'perro alojado' : 'perros alojados'}`} />
+      <CardList items={items} emptyText="Nadie alojado ahora mismo." />
+    </div>
+  );
+}
+
+function ClientsView({ merged, pending }) {
+  const [query, setQuery] = useState('');
+  const unique = useMemo(() => {
+    const fromMerged = merged.filter((r) => r._hubspot).map((r) => r._hubspot);
+    const all = [...fromMerged, ...pending];
+    const map = new Map();
+    for (const h of all) {
+      if (!h.id) continue;
+      const existing = map.get(h.id);
+      if (!existing || (h.submittedAt?.getTime() || 0) > (existing.submittedAt?.getTime() || 0)) {
+        map.set(h.id, h);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => (b.submittedAt?.getTime() || 0) - (a.submittedAt?.getTime() || 0));
+  }, [merged, pending]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    if (!q) return unique;
+    return unique.filter((h) => {
+      const hay = [h.guest, h.pet, h.email, h.phone, h.breed, h.address]
+        .filter(Boolean).join(' ').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+      return hay.includes(q);
+    });
+  }, [unique, query]);
+
+  return (
+    <div>
+      <PageHeader title="Clientes" subtitle={`${unique.length} ${unique.length === 1 ? 'ficha HubSpot' : 'fichas HubSpot'}`} />
+      <div style={{ padding: '0 32px 16px' }}>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Buscar por dueño, perro, email, teléfono..."
+          className="input"
+          style={{
+            width: '100%', padding: '10px 14px',
+            border: '1px solid rgba(33, 57, 44, 0.2)',
+            borderRadius: 8, fontSize: 14, fontFamily: 'inherit',
+          }}
+        />
+        {query && (
+          <div style={{ marginTop: 6, fontSize: 12, color: C.ink, opacity: 0.55 }}>
+            {filtered.length} {filtered.length === 1 ? 'resultado' : 'resultados'}
+          </div>
+        )}
+      </div>
+      <div style={{ padding: '0 32px 60px' }}>
+        {filtered.length === 0 ? (
+          <div style={{ padding: 28, background: 'rgba(33, 57, 44, 0.04)', borderRadius: 12, color: C.ink, opacity: 0.6, fontSize: 14, textAlign: 'center' }}>
+            {query ? 'Sin coincidencias.' : 'Sin fichas HubSpot.'}
+          </div>
+        ) : (
+          filtered.map((h) => <ClientRow key={h.id} h={h} />)
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ClientRow({ h }) {
+  const meta = [h.breed, h.size, h.sex, h.age && `${h.age} años`, h.weight && `${h.weight} kg`].filter(Boolean).join(' · ');
+  const contact = [h.email, h.phone, h.address].filter(Boolean).join(' · ');
+  return (
+    <div style={{
+      padding: '14px 18px', marginBottom: 8,
+      background: C.cream, border: '1px solid rgba(33, 57, 44, 0.12)',
+      borderRadius: 10,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 }}>
+        <div>
+          <span className="display" style={{ fontSize: 22, lineHeight: 1 }}>{h.pet || '—'}</span>
+          {h.guest && <span style={{ marginLeft: 8, fontSize: 13, opacity: 0.7 }}>· {h.guest}</span>}
+        </div>
+        {h.submittedAt && (
+          <span className="eyebrow eyebrow-sm" style={{ opacity: 0.5 }}>
+            Formulario: {h.submittedAt.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
+          </span>
+        )}
+      </div>
+      {meta && <div style={{ marginTop: 4, fontSize: 13, opacity: 0.85 }}>{meta}</div>}
+      {contact && <div style={{ marginTop: 3, fontSize: 12, opacity: 0.65 }}>{contact}</div>}
+    </div>
+  );
+}
+
+function TransportsView({ merged }) {
+  const jobs = useMemo(() => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const limit = new Date(today); limit.setDate(limit.getDate() + 7); limit.setHours(23, 59, 59, 999);
+    const out = [];
+    merged.forEach((r) => {
+      const products = String(r.products || '');
+      const hasIda = /transporte\s*ida/i.test(products);
+      const hasVuelta = /transporte\s*vuelta/i.test(products);
+      if (hasIda && r.arrival && r.arrival >= today && r.arrival <= limit) {
+        out.push({ kind: 'ida', time: r.arrival, r });
+      }
+      if (hasVuelta && r.departure && r.departure >= today && r.departure <= limit) {
+        out.push({ kind: 'vuelta', time: r.departure, r });
+      }
+    });
+    out.sort((a, b) => a.time.getTime() - b.time.getTime());
+    return out;
+  }, [merged]);
+
+  const byDay = useMemo(() => {
+    const groups = new Map();
+    jobs.forEach((j) => {
+      const k = dateKey(j.time);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(j);
+    });
+    return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [jobs]);
+
+  return (
+    <div>
+      <PageHeader title="Transportes" subtitle={`Próximos 7 días · ${jobs.length} ${jobs.length === 1 ? 'servicio' : 'servicios'}`} />
+      {byDay.length === 0 ? (
+        <div style={{ margin: '0 32px 60px', padding: 28, background: 'rgba(33, 57, 44, 0.04)', borderRadius: 12, color: C.ink, opacity: 0.65, fontSize: 14, textAlign: 'center' }}>
+          Sin transportes programados en los próximos 7 días.
+        </div>
+      ) : (
+        <div style={{ padding: '0 32px 60px' }}>
+          {byDay.map(([dKey, dayJobs]) => <TransportDayBlock key={dKey} dKey={dKey} jobs={dayJobs} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TransportDayBlock({ dKey, jobs }) {
+  const date = new Date(dKey + 'T00:00:00');
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  let label;
+  if (date.getTime() === today.getTime()) label = 'Hoy';
+  else if (date.getTime() === tomorrow.getTime()) label = 'Mañana';
+  else label = `${WEEKDAY_ES[date.getDay()]} ${date.getDate()} ${MONTH_ES[date.getMonth()]}`;
+  return (
+    <section style={{ marginBottom: 24 }}>
+      <h3 className="display" style={{ fontSize: 22, color: C.ink, margin: '0 0 10px', textTransform: 'capitalize' }}>{label}</h3>
+      {jobs.map((j, i) => <TransportJobRow key={`${j.r.id}-${j.kind}-${i}`} job={j} />)}
+    </section>
+  );
+}
+
+function TransportJobRow({ job }) {
+  const { kind, time, r } = job;
+  const isIda = kind === 'ida';
+  const directionLabel = isIda ? 'Pickup · Ida' : 'Dropoff · Vuelta';
+  const accent = isIda ? C.celeste : C.lila;
+  const timeStr = `${pad2(time.getHours())}:${pad2(time.getMinutes())}`;
+  const showTime = !(time.getHours() === 0 && time.getMinutes() === 0);
+  const noAddress = !r.address;
+  const noPhone = !r.phone;
+  return (
+    <div style={{
+      padding: 14, marginBottom: 8,
+      background: C.cream,
+      border: `1px solid rgba(33, 57, 44, 0.12)`,
+      borderLeft: `4px solid ${accent}`,
+      borderRadius: 8,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <span className="eyebrow eyebrow-sm" style={{ color: accent === C.celeste ? C.ocre : C.lila, fontWeight: 700 }}>{directionLabel}</span>
+          <div style={{ marginTop: 3 }}>
+            <span className="display" style={{ fontSize: 20, lineHeight: 1 }}>{r.pet || '—'}</span>
+            <span style={{ marginLeft: 8, fontSize: 13, opacity: 0.7 }}>· {r.guest || '—'}</span>
+          </div>
+        </div>
+        {showTime && (
+          <span className="display tabular" style={{ fontSize: 22, color: C.ink }}>{timeStr}</span>
+        )}
+      </div>
+      <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.5 }}>
+        <div>
+          <span style={{ opacity: 0.6 }}>Tel:</span>{' '}
+          {noPhone
+            ? <span style={{ color: C.brick }}>Sin teléfono — pedir al cliente</span>
+            : <strong>{r.phone}</strong>}
+        </div>
+        <div>
+          <span style={{ opacity: 0.6 }}>{isIda ? 'Recogida en:' : 'Entrega en:'}</span>{' '}
+          {noAddress
+            ? <span style={{ color: C.brick }}>Sin dirección — falta ficha HubSpot o columna Dirección vacía</span>
+            : <strong>{r.address}</strong>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const route = useRoute();
+  const isAdmin = route === '#admin';
+  const [collapsed, setCollapsed] = useState(getInitialSidebarCollapsed);
   const [config, setConfig] = useState(DEFAULT_CONFIG);
-  const [meta, setMeta] = useState({ capacity: 30, lastUpdated: null });
+  const [meta, setMeta] = useState({ capacity: 42, lastUpdated: null });
   const [now, setNow] = useState(new Date());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -774,13 +1511,13 @@ export default function App() {
     }
   }, [loading, config, refresh]);
 
-  // Auto-refresh every 60s in kiosk mode (only if any source is configured)
+  // Auto-refresh every 60s on any non-admin route (only if any source is configured)
   useEffect(() => {
-    if (mode !== 'kiosk') return;
+    if (isAdmin) return;
     if (!config.mewsUrl && !config.hubspotUrl && !config.calendlyUrl) return;
     const id = setInterval(() => refresh(config), 60000);
     return () => clearInterval(id);
-  }, [mode, config, refresh]);
+  }, [isAdmin, config, refresh]);
 
   // Live clock
   useEffect(() => {
@@ -788,16 +1525,14 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
-  // Hash routing
-  useEffect(() => {
-    const onHash = () => setMode(window.location.hash === '#admin' ? 'admin' : 'kiosk');
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
-  }, []);
+  const switchMode = (m) => navigate(m === 'admin' ? '#admin' : '#/dashboard');
 
-  const switchMode = (m) => {
-    window.location.hash = m === 'admin' ? '#admin' : '';
-    setMode(m);
+  const toggleSidebar = () => {
+    setCollapsed((c) => {
+      const next = !c;
+      try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next)); } catch {}
+      return next;
+    });
   };
 
   const saveConfig = async (newCfg) => {
@@ -829,14 +1564,21 @@ export default function App() {
     await storage.delete(STORAGE_KEYS.cache, true);
   };
 
-  return (
-    <div className="doggos-app" style={{ minHeight: '100vh', position: 'relative' }}>
-      <style>{STYLES}</style>
-      {loading ? (
+  if (loading) {
+    return (
+      <div className="doggos-app" style={{ minHeight: '100vh', position: 'relative' }}>
+        <style>{STYLES}</style>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
           <span className="display" style={{ fontSize: 32, color: C.ink, opacity: 0.5 }}>cargando…</span>
         </div>
-      ) : mode === 'admin' ? (
+      </div>
+    );
+  }
+
+  if (isAdmin) {
+    return (
+      <div className="doggos-app" style={{ minHeight: '100vh', position: 'relative' }}>
+        <style>{STYLES}</style>
         <AdminView
           config={config}
           meta={meta}
@@ -852,7 +1594,33 @@ export default function App() {
           onClearCache={clearCache}
           onSwitchMode={switchMode}
         />
-      ) : (
+      </div>
+    );
+  }
+
+  const isConfigured = !!(config.mewsUrl || config.hubspotUrl || config.calendlyUrl);
+  const sidebarWidth = collapsed ? 64 : 220;
+
+  let routeBody;
+  switch (route) {
+    case '#/arrivals/today':
+      routeBody = <ArrivalsTodayView merged={merged} />;
+      break;
+    case '#/departures/today':
+      routeBody = <DeparturesTodayView merged={merged} />;
+      break;
+    case '#/inhouse':
+      routeBody = <InHouseView merged={merged} />;
+      break;
+    case '#/clients':
+      routeBody = <ClientsView merged={merged} pending={pending} />;
+      break;
+    case '#/transports':
+      routeBody = <TransportsView merged={merged} />;
+      break;
+    case '#/dashboard':
+    default:
+      routeBody = (
         <KioskView
           merged={merged}
           pending={pending}
@@ -861,10 +1629,19 @@ export default function App() {
           now={now}
           refreshing={refreshing}
           fetchErrors={fetchErrors}
-          isConfigured={!!(config.mewsUrl || config.hubspotUrl || config.calendlyUrl)}
+          isConfigured={isConfigured}
           onSwitchMode={switchMode}
         />
-      )}
+      );
+  }
+
+  return (
+    <div className="doggos-app" style={{ minHeight: '100vh', position: 'relative' }}>
+      <style>{STYLES}</style>
+      <Sidebar route={route} collapsed={collapsed} onToggle={toggleSidebar} />
+      <div style={{ paddingLeft: sidebarWidth, transition: 'padding-left 200ms ease', minHeight: '100vh', position: 'relative' }}>
+        {routeBody}
+      </div>
     </div>
   );
 }
@@ -915,16 +1692,6 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
   }, [allActive]);
 
   const occupancyPct = meta.capacity > 0 ? (inHouse.length / meta.capacity) * 100 : 0;
-  const revenueToday = useMemo(() => inHouse.reduce((s, r) => s + (r.rate || 0), 0), [inHouse]);
-  const revenueWeek = useMemo(() => {
-    const start = new Date(); start.setDate(start.getDate() - 7);
-    return merged.filter((r) => r.arrival && r.arrival >= start).reduce((s, r) => s + (r.amount || 0), 0);
-  }, [merged]);
-  const adr = useMemo(() => {
-    const stays = merged.filter((r) => r.rate > 0);
-    if (stays.length === 0) return 0;
-    return stays.reduce((s, r) => s + r.rate, 0) / stays.length;
-  }, [merged]);
 
   // Calendly upcoming events (today + tomorrow)
   const upcomingEvents = useMemo(() => {
@@ -988,12 +1755,11 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
 
       {/* Hero KPI band */}
       <section style={{ position: 'relative', margin: '20px 32px 0', borderRadius: 20, background: C.ink, color: C.cream, padding: '28px 32px 24px', overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 28, position: 'relative', zIndex: 2 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 28, position: 'relative', zIndex: 2 }}>
           <Stat label="En casa" value={`${inHouse.length}/${meta.capacity}`} sub={pct(occupancyPct)} />
-          <Stat label="Llegadas hoy" value={String(arrivalsToday.length)} sub={arrivalsToday.length === 1 ? 'reserva' : 'reservas'} />
-          <Stat label="Salidas hoy" value={String(departuresToday.length)} sub={departuresToday.length === 1 ? 'reserva' : 'reservas'} />
-          <Stat label="Alertas" value={String(alertsList.length)} sub={alertsList.length === 1 ? 'activa' : 'activas'} />
-          <Stat label="Ingresos hoy" value={eur(revenueToday)} sub={`ADR ${eur(adr)}`} />
+          <Stat label="Llegadas hoy" value={String(arrivalsToday.length)} sub={arrivalsToday.length === 1 ? 'reserva' : 'reservas'} onClick={() => navigate('#/arrivals/today')} />
+          <Stat label="Salidas hoy" value={String(departuresToday.length)} sub={departuresToday.length === 1 ? 'reserva' : 'reservas'} onClick={() => navigate('#/departures/today')} />
+          <Stat label="Alertas activas" value={String(alertsList.length)} sub={alertsList.length === 1 ? 'activa' : 'activas'} />
           <Stat label="Por confirmar" value={String(pending.length)} sub="forms sin reserva" valueColor={pending.length > 0 ? C.celeste : C.amarillo} />
         </div>
         <OccupancyCells inHouse={inHouse.length} capacity={meta.capacity} />
@@ -1002,8 +1768,8 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
       {/* Calendly strip — today + tomorrow */}
       <CalendlyStrip events={upcomingEvents} todayCount={eventsTodayCount} />
 
-      {/* Three columns */}
-      <main style={{ flex: 1, padding: '20px 32px 100px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, minHeight: 0 }}>
+      {/* Four columns */}
+      <main style={{ flex: 1, padding: '20px 32px 100px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, minHeight: 0 }}>
         <Column title="Llegadas hoy" eyebrow="Check-in" count={arrivalsToday.length}>
           {arrivalsToday.length === 0
             ? <Empty>Sin llegadas previstas hoy</Empty>
@@ -1014,6 +1780,14 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
           {departuresToday.length === 0
             ? <Empty>Sin salidas previstas hoy</Empty>
             : departuresToday.map((r) => <GuestRow key={r.id} r={r} time={r.departure} variant="departure" />)}
+        </Column>
+
+        <Column title="In-House" eyebrow="Durmiendo" count={inHouse.length}>
+          {inHouse.length === 0
+            ? <Empty>Nadie alojado ahora mismo</Empty>
+            : [...inHouse]
+                .sort((a, b) => (a.departure?.getTime() || 0) - (b.departure?.getTime() || 0))
+                .map((r) => <GuestRow key={r.id} r={r} time={r.departure} variant="inhouse" />)}
         </Column>
 
         <Column title="Alertas activas" eyebrow="Atención" count={alertsList.length}>
@@ -1048,13 +1822,20 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
 
 /* ----------------------- kiosk subcomponents ----------------------- */
 
-function Stat({ label, value, sub, valueColor }) {
+function Stat({ label, value, sub, valueColor, onClick }) {
+  const baseStyle = { display: 'flex', flexDirection: 'column', gap: 4 };
+  const interactiveStyle = onClick ? {
+    background: 'transparent', border: 'none', padding: 0,
+    color: 'inherit', font: 'inherit', textAlign: 'left',
+    cursor: 'pointer',
+  } : {};
+  const Tag = onClick ? 'button' : 'div';
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <Tag onClick={onClick} className={onClick ? 'stat-clickable' : undefined} style={{ ...baseStyle, ...interactiveStyle }}>
       <span className="eyebrow eyebrow-sm" style={{ color: C.celeste, opacity: 0.85 }}>{label}</span>
       <span className="display tabular" style={{ fontSize: 40, lineHeight: 1, color: valueColor || C.amarillo }}>{value}</span>
       <span style={{ fontSize: 11, opacity: 0.65, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase' }}>{sub}</span>
-    </div>
+    </Tag>
   );
 }
 
@@ -1170,13 +1951,21 @@ function Column({ title, eyebrow, count, children }) {
 function GuestRow({ r, time, variant }) {
   const flags = detectAlerts(r);
   const tint = topAlertTint(flags);
-  const t = time ? `${pad2(time.getHours())}:${pad2(time.getMinutes())}` : '--';
+  const eyebrowLabel = (() => {
+    if (!time) return '--';
+    if (variant === 'inhouse') {
+      return `Sale ${time.getDate()} ${time.toLocaleDateString('es-ES', { month: 'short' }).replace('.', '')}`;
+    }
+    return `${pad2(time.getHours())}:${pad2(time.getMinutes())}`;
+  })();
+  const eyebrowIcon = variant === 'arrival' ? '↘' : variant === 'departure' ? '↗' : '●';
+  const eyebrowColor = variant === 'arrival' ? C.ink : variant === 'departure' ? C.ocre : C.celeste;
   const breedSize = [r.breed, r.size].filter(Boolean).join(' · ');
   return (
     <div className={`row fade-in ${tint}`}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-        <span className="eyebrow tabular" style={{ color: variant === 'arrival' ? C.ink : C.ocre }}>
-          {variant === 'arrival' ? '↘' : '↗'} {t}
+        <span className="eyebrow tabular" style={{ color: eyebrowColor }}>
+          {eyebrowIcon} {eyebrowLabel}
         </span>
         <span className="eyebrow eyebrow-sm" style={{ opacity: 0.55, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {r.spaceType || r.service}
@@ -1325,25 +2114,19 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, fetchErrors,
           </div>
         </div>
 
-        {/* Capacity */}
-        <div className="tile" style={{ padding: 24, marginTop: 20 }}>
-          <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6 }}>Configuración</div>
-          <h3 className="display" style={{ fontSize: 28, lineHeight: 1, marginTop: 4 }}>Capacidad total</h3>
-          <p style={{ fontSize: 14, opacity: 0.75, marginTop: 8, marginBottom: 16 }}>
-            Número total de plazas para calcular la ocupación.
-          </p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <input
-              type="number"
-              value={capInput}
-              onChange={(e) => setCapInput(Number(e.target.value) || 0)}
-              className="input tabular display"
-              style={{ width: 120, fontSize: 24, textAlign: 'center', padding: 10 }}
-              min={1}
-            />
-            <button onClick={() => onSaveCapacity(capInput)} className="btn celeste">Guardar</button>
-            <span className="eyebrow eyebrow-sm" style={{ opacity: 0.55 }}>Actual: {meta.capacity}</span>
-          </div>
+        {/* Capacity — compact single row */}
+        <div className="tile" style={{ padding: '12px 16px', marginTop: 20, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span className="eyebrow eyebrow-sm" style={{ opacity: 0.7 }}>Capacidad total</span>
+          <input
+            type="number"
+            value={capInput}
+            onChange={(e) => setCapInput(Number(e.target.value) || 0)}
+            className="input tabular"
+            style={{ width: 70, fontSize: 14, textAlign: 'center', padding: '6px 8px' }}
+            min={1}
+          />
+          <button onClick={() => onSaveCapacity(capInput)} className="btn celeste" style={{ padding: '6px 12px', fontSize: 13 }}>Guardar</button>
+          <span className="eyebrow eyebrow-sm" style={{ opacity: 0.5 }}>Actual: {meta.capacity}</span>
         </div>
 
         {/* Apps Script template */}
