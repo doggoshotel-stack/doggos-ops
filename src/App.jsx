@@ -230,7 +230,6 @@ const normName = (v) =>
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-const eur = (n) => `€${Math.round(n).toLocaleString('es-ES')}`;
 const pct = (n) => `${Math.round(n)}%`;
 const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
 
@@ -642,10 +641,233 @@ function parseCalendlyRow(row, idx) {
   };
 }
 
-export default function App() {
-  const [mode, setMode] = useState(() =>
-    typeof window !== 'undefined' && window.location.hash === '#admin' ? 'admin' : 'kiosk'
+/* ----------------------- routing + layout ----------------------- */
+
+const SIDEBAR_COLLAPSED_KEY = 'doggos_sidebar_collapsed';
+
+function getRoute() {
+  if (typeof window === 'undefined') return '#/dashboard';
+  const h = window.location.hash;
+  if (h === '#admin') return '#admin';
+  if (!h || h === '#' || h === '#/') return '#/dashboard';
+  return h;
+}
+
+function navigate(hash) {
+  if (typeof window !== 'undefined') window.location.hash = hash;
+}
+
+function useRoute() {
+  const [route, setRoute] = useState(getRoute);
+  useEffect(() => {
+    const onChange = () => setRoute(getRoute());
+    window.addEventListener('hashchange', onChange);
+    return () => window.removeEventListener('hashchange', onChange);
+  }, []);
+  return route;
+}
+
+function getInitialSidebarCollapsed() {
+  if (typeof window === 'undefined') return false;
+  try {
+    const stored = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+    if (stored !== null) return stored === 'true';
+  } catch {}
+  return window.innerWidth < 1100;
+}
+
+const NAV_ICON = {
+  dashboard: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <rect x="2.5" y="2.5" width="6" height="6" /><rect x="11.5" y="2.5" width="6" height="6" />
+      <rect x="2.5" y="11.5" width="6" height="6" /><rect x="11.5" y="11.5" width="6" height="6" />
+    </svg>
+  ),
+  arrivals: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M2 10 L12 10 M9 7 L12 10 L9 13" /><rect x="14" y="3" width="4" height="14" />
+    </svg>
+  ),
+  departures: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <rect x="2" y="3" width="4" height="14" /><path d="M8 10 L18 10 M15 7 L18 10 L15 13" />
+    </svg>
+  ),
+  clients: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="10" cy="6.5" r="3" /><path d="M3.5 17.5 C3.5 13.5 6.5 11.5 10 11.5 C13.5 11.5 16.5 13.5 16.5 17.5" />
+    </svg>
+  ),
+  transports: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <rect x="1.5" y="6" width="13" height="7.5" /><path d="M14.5 8 L18.5 8 L18.5 13.5 L14.5 13.5" />
+      <circle cx="6" cy="15" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="14" cy="15" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  chevronLeft: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 3 L4 8 L10 13" /></svg>
+  ),
+  chevronRight: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 3 L12 8 L6 13" /></svg>
+  ),
+};
+
+const NAV_ITEMS = [
+  { hash: '#/dashboard',       label: 'Dashboard',    icon: NAV_ICON.dashboard },
+  { hash: '#/arrivals/today',  label: 'Llegadas hoy', icon: NAV_ICON.arrivals },
+  { hash: '#/departures/today',label: 'Salidas hoy',  icon: NAV_ICON.departures },
+  { hash: '#/clients',         label: 'Clientes',     icon: NAV_ICON.clients },
+  { hash: '#/transports',      label: 'Transportes',  icon: NAV_ICON.transports },
+];
+
+function Sidebar({ route, collapsed, onToggle }) {
+  const W = collapsed ? 64 : 220;
+  return (
+    <aside style={{
+      position: 'fixed', left: 0, top: 0, bottom: 0,
+      width: W, background: C.ink, color: C.cream,
+      display: 'flex', flexDirection: 'column',
+      transition: 'width 200ms ease',
+      zIndex: 50, overflow: 'hidden',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center',
+        justifyContent: collapsed ? 'center' : 'space-between',
+        padding: collapsed ? '20px 0' : '20px 14px 20px 20px',
+        borderBottom: '1px solid rgba(234, 232, 221, 0.15)',
+        minHeight: 60,
+      }}>
+        {!collapsed && (
+          <span className="display" style={{ fontSize: 22, color: C.cream, lineHeight: 1 }}>doggos</span>
+        )}
+        <button
+          onClick={onToggle}
+          aria-label={collapsed ? 'Expandir menú' : 'Colapsar menú'}
+          style={{
+            background: 'transparent', border: 'none', color: C.cream,
+            cursor: 'pointer', padding: 6, borderRadius: 4,
+            display: 'flex', alignItems: 'center',
+          }}
+        >
+          {collapsed ? NAV_ICON.chevronRight : NAV_ICON.chevronLeft}
+        </button>
+      </div>
+      <nav style={{ display: 'flex', flexDirection: 'column', padding: '12px 8px', gap: 4, flex: 1 }}>
+        {NAV_ITEMS.map((item) => {
+          const active = route === item.hash;
+          return (
+            <button
+              key={item.hash}
+              onClick={() => navigate(item.hash)}
+              title={collapsed ? item.label : undefined}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: collapsed ? '12px 0' : '10px 12px',
+                justifyContent: collapsed ? 'center' : 'flex-start',
+                background: active ? C.amarillo : 'transparent',
+                color: active ? C.ink : C.cream,
+                border: 'none', borderRadius: 8,
+                cursor: 'pointer', fontSize: 14, fontWeight: 500,
+                whiteSpace: 'nowrap', overflow: 'hidden',
+                fontFamily: 'inherit', textAlign: 'left', width: '100%',
+              }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', flex: 'none' }}>{item.icon}</span>
+              {!collapsed && <span>{item.label}</span>}
+            </button>
+          );
+        })}
+      </nav>
+    </aside>
   );
+}
+
+function PageHeader({ title, subtitle }) {
+  return (
+    <header style={{ padding: '32px 32px 16px' }}>
+      <h1 className="display" style={{ fontSize: 36, color: C.ink, margin: 0, lineHeight: 1 }}>{title}</h1>
+      {subtitle && (
+        <div className="eyebrow eyebrow-sm" style={{ color: C.ink, opacity: 0.6, marginTop: 6 }}>{subtitle}</div>
+      )}
+    </header>
+  );
+}
+
+function ComingSoon({ note }) {
+  return (
+    <div style={{ margin: '0 32px', padding: 24, borderRadius: 12, background: 'rgba(33, 57, 44, 0.06)', color: C.ink, fontSize: 14 }}>
+      Vista en construcción. {note}
+    </div>
+  );
+}
+
+function ArrivalsTodayView({ merged }) {
+  const today = todayKey();
+  const items = merged
+    .filter((r) => dateKey(r.arrival) === today)
+    .sort((a, b) => (a.arrival?.getTime() || 0) - (b.arrival?.getTime() || 0));
+  return (
+    <div>
+      <PageHeader title="Llegadas hoy" subtitle={`${items.length} ${items.length === 1 ? 'reserva' : 'reservas'}`} />
+      <ComingSoon note="Próximo paso: tarjetas detalladas con perfil del perro (Mews + HubSpot)." />
+      <ul style={{ listStyle: 'none', padding: '16px 32px', margin: 0 }}>
+        {items.map((r) => (
+          <li key={r.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(33, 57, 44, 0.1)', color: C.ink, fontSize: 14 }}>
+            <strong>{r.pet || '—'}</strong> · {r.guest} · {r.arrival ? `${pad2(r.arrival.getHours())}:${pad2(r.arrival.getMinutes())}` : '—'}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function DeparturesTodayView({ merged }) {
+  const today = todayKey();
+  const items = merged
+    .filter((r) => dateKey(r.departure) === today)
+    .sort((a, b) => (a.departure?.getTime() || 0) - (b.departure?.getTime() || 0));
+  return (
+    <div>
+      <PageHeader title="Salidas hoy" subtitle={`${items.length} ${items.length === 1 ? 'reserva' : 'reservas'}`} />
+      <ComingSoon note="Próximo paso: tarjetas detalladas y resumen de logística de salida." />
+      <ul style={{ listStyle: 'none', padding: '16px 32px', margin: 0 }}>
+        {items.map((r) => (
+          <li key={r.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(33, 57, 44, 0.1)', color: C.ink, fontSize: 14 }}>
+            <strong>{r.pet || '—'}</strong> · {r.guest} · {r.departure ? `${pad2(r.departure.getHours())}:${pad2(r.departure.getMinutes())}` : '—'}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ClientsView({ merged, pending }) {
+  const allHubspot = useMemo(() => {
+    const fromMerged = merged.filter((r) => r._hubspot).map((r) => r._hubspot);
+    return [...fromMerged, ...pending];
+  }, [merged, pending]);
+  return (
+    <div>
+      <PageHeader title="Clientes" subtitle={`${allHubspot.length} fichas HubSpot`} />
+      <ComingSoon note="Próximo paso: búsqueda y ficha completa por cliente." />
+    </div>
+  );
+}
+
+function TransportsView({ merged }) {
+  return (
+    <div>
+      <PageHeader title="Transportes" subtitle="Próximos 7 días" />
+      <ComingSoon note="Próximo paso: pickups (ida) y dropoffs (vuelta) agrupados por día con dirección del dueño." />
+    </div>
+  );
+}
+
+export default function App() {
+  const route = useRoute();
+  const isAdmin = route === '#admin';
+  const [collapsed, setCollapsed] = useState(getInitialSidebarCollapsed);
   const [config, setConfig] = useState(DEFAULT_CONFIG);
   const [meta, setMeta] = useState({ capacity: 30, lastUpdated: null });
   const [now, setNow] = useState(new Date());
@@ -774,13 +996,13 @@ export default function App() {
     }
   }, [loading, config, refresh]);
 
-  // Auto-refresh every 60s in kiosk mode (only if any source is configured)
+  // Auto-refresh every 60s on any non-admin route (only if any source is configured)
   useEffect(() => {
-    if (mode !== 'kiosk') return;
+    if (isAdmin) return;
     if (!config.mewsUrl && !config.hubspotUrl && !config.calendlyUrl) return;
     const id = setInterval(() => refresh(config), 60000);
     return () => clearInterval(id);
-  }, [mode, config, refresh]);
+  }, [isAdmin, config, refresh]);
 
   // Live clock
   useEffect(() => {
@@ -788,16 +1010,14 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
-  // Hash routing
-  useEffect(() => {
-    const onHash = () => setMode(window.location.hash === '#admin' ? 'admin' : 'kiosk');
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
-  }, []);
+  const switchMode = (m) => navigate(m === 'admin' ? '#admin' : '#/dashboard');
 
-  const switchMode = (m) => {
-    window.location.hash = m === 'admin' ? '#admin' : '';
-    setMode(m);
+  const toggleSidebar = () => {
+    setCollapsed((c) => {
+      const next = !c;
+      try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next)); } catch {}
+      return next;
+    });
   };
 
   const saveConfig = async (newCfg) => {
@@ -829,14 +1049,21 @@ export default function App() {
     await storage.delete(STORAGE_KEYS.cache, true);
   };
 
-  return (
-    <div className="doggos-app" style={{ minHeight: '100vh', position: 'relative' }}>
-      <style>{STYLES}</style>
-      {loading ? (
+  if (loading) {
+    return (
+      <div className="doggos-app" style={{ minHeight: '100vh', position: 'relative' }}>
+        <style>{STYLES}</style>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
           <span className="display" style={{ fontSize: 32, color: C.ink, opacity: 0.5 }}>cargando…</span>
         </div>
-      ) : mode === 'admin' ? (
+      </div>
+    );
+  }
+
+  if (isAdmin) {
+    return (
+      <div className="doggos-app" style={{ minHeight: '100vh', position: 'relative' }}>
+        <style>{STYLES}</style>
         <AdminView
           config={config}
           meta={meta}
@@ -852,7 +1079,30 @@ export default function App() {
           onClearCache={clearCache}
           onSwitchMode={switchMode}
         />
-      ) : (
+      </div>
+    );
+  }
+
+  const isConfigured = !!(config.mewsUrl || config.hubspotUrl || config.calendlyUrl);
+  const sidebarWidth = collapsed ? 64 : 220;
+
+  let routeBody;
+  switch (route) {
+    case '#/arrivals/today':
+      routeBody = <ArrivalsTodayView merged={merged} />;
+      break;
+    case '#/departures/today':
+      routeBody = <DeparturesTodayView merged={merged} />;
+      break;
+    case '#/clients':
+      routeBody = <ClientsView merged={merged} pending={pending} />;
+      break;
+    case '#/transports':
+      routeBody = <TransportsView merged={merged} />;
+      break;
+    case '#/dashboard':
+    default:
+      routeBody = (
         <KioskView
           merged={merged}
           pending={pending}
@@ -861,10 +1111,19 @@ export default function App() {
           now={now}
           refreshing={refreshing}
           fetchErrors={fetchErrors}
-          isConfigured={!!(config.mewsUrl || config.hubspotUrl || config.calendlyUrl)}
+          isConfigured={isConfigured}
           onSwitchMode={switchMode}
         />
-      )}
+      );
+  }
+
+  return (
+    <div className="doggos-app" style={{ minHeight: '100vh', position: 'relative' }}>
+      <style>{STYLES}</style>
+      <Sidebar route={route} collapsed={collapsed} onToggle={toggleSidebar} />
+      <div style={{ paddingLeft: sidebarWidth, transition: 'padding-left 200ms ease', minHeight: '100vh', position: 'relative' }}>
+        {routeBody}
+      </div>
     </div>
   );
 }
@@ -915,16 +1174,6 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
   }, [allActive]);
 
   const occupancyPct = meta.capacity > 0 ? (inHouse.length / meta.capacity) * 100 : 0;
-  const revenueToday = useMemo(() => inHouse.reduce((s, r) => s + (r.rate || 0), 0), [inHouse]);
-  const revenueWeek = useMemo(() => {
-    const start = new Date(); start.setDate(start.getDate() - 7);
-    return merged.filter((r) => r.arrival && r.arrival >= start).reduce((s, r) => s + (r.amount || 0), 0);
-  }, [merged]);
-  const adr = useMemo(() => {
-    const stays = merged.filter((r) => r.rate > 0);
-    if (stays.length === 0) return 0;
-    return stays.reduce((s, r) => s + r.rate, 0) / stays.length;
-  }, [merged]);
 
   // Calendly upcoming events (today + tomorrow)
   const upcomingEvents = useMemo(() => {
@@ -988,12 +1237,11 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
 
       {/* Hero KPI band */}
       <section style={{ position: 'relative', margin: '20px 32px 0', borderRadius: 20, background: C.ink, color: C.cream, padding: '28px 32px 24px', overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 28, position: 'relative', zIndex: 2 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 28, position: 'relative', zIndex: 2 }}>
           <Stat label="En casa" value={`${inHouse.length}/${meta.capacity}`} sub={pct(occupancyPct)} />
-          <Stat label="Llegadas hoy" value={String(arrivalsToday.length)} sub={arrivalsToday.length === 1 ? 'reserva' : 'reservas'} />
-          <Stat label="Salidas hoy" value={String(departuresToday.length)} sub={departuresToday.length === 1 ? 'reserva' : 'reservas'} />
-          <Stat label="Alertas" value={String(alertsList.length)} sub={alertsList.length === 1 ? 'activa' : 'activas'} />
-          <Stat label="Ingresos hoy" value={eur(revenueToday)} sub={`ADR ${eur(adr)}`} />
+          <Stat label="Llegadas hoy" value={String(arrivalsToday.length)} sub={arrivalsToday.length === 1 ? 'reserva' : 'reservas'} onClick={() => navigate('#/arrivals/today')} />
+          <Stat label="Salidas hoy" value={String(departuresToday.length)} sub={departuresToday.length === 1 ? 'reserva' : 'reservas'} onClick={() => navigate('#/departures/today')} />
+          <Stat label="Alertas activas" value={String(alertsList.length)} sub={alertsList.length === 1 ? 'activa' : 'activas'} />
           <Stat label="Por confirmar" value={String(pending.length)} sub="forms sin reserva" valueColor={pending.length > 0 ? C.celeste : C.amarillo} />
         </div>
         <OccupancyCells inHouse={inHouse.length} capacity={meta.capacity} />
@@ -1048,13 +1296,20 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
 
 /* ----------------------- kiosk subcomponents ----------------------- */
 
-function Stat({ label, value, sub, valueColor }) {
+function Stat({ label, value, sub, valueColor, onClick }) {
+  const baseStyle = { display: 'flex', flexDirection: 'column', gap: 4 };
+  const interactiveStyle = onClick ? {
+    background: 'transparent', border: 'none', padding: 0,
+    color: 'inherit', font: 'inherit', textAlign: 'left',
+    cursor: 'pointer',
+  } : {};
+  const Tag = onClick ? 'button' : 'div';
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <Tag onClick={onClick} className={onClick ? 'stat-clickable' : undefined} style={{ ...baseStyle, ...interactiveStyle }}>
       <span className="eyebrow eyebrow-sm" style={{ color: C.celeste, opacity: 0.85 }}>{label}</span>
       <span className="display tabular" style={{ fontSize: 40, lineHeight: 1, color: valueColor || C.amarillo }}>{value}</span>
       <span style={{ fontSize: 11, opacity: 0.65, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase' }}>{sub}</span>
-    </div>
+    </Tag>
   );
 }
 
