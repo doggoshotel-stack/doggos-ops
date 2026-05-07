@@ -1184,23 +1184,197 @@ function InHouseView({ merged }) {
 }
 
 function ClientsView({ merged, pending }) {
-  const allHubspot = useMemo(() => {
+  const [query, setQuery] = useState('');
+  const unique = useMemo(() => {
     const fromMerged = merged.filter((r) => r._hubspot).map((r) => r._hubspot);
-    return [...fromMerged, ...pending];
+    const all = [...fromMerged, ...pending];
+    const map = new Map();
+    for (const h of all) {
+      if (!h.id) continue;
+      const existing = map.get(h.id);
+      if (!existing || (h.submittedAt?.getTime() || 0) > (existing.submittedAt?.getTime() || 0)) {
+        map.set(h.id, h);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => (b.submittedAt?.getTime() || 0) - (a.submittedAt?.getTime() || 0));
   }, [merged, pending]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    if (!q) return unique;
+    return unique.filter((h) => {
+      const hay = [h.guest, h.pet, h.email, h.phone, h.breed, h.address]
+        .filter(Boolean).join(' ').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+      return hay.includes(q);
+    });
+  }, [unique, query]);
+
   return (
     <div>
-      <PageHeader title="Clientes" subtitle={`${allHubspot.length} fichas HubSpot`} />
-      <ComingSoon note="Próximo paso: búsqueda y ficha completa por cliente." />
+      <PageHeader title="Clientes" subtitle={`${unique.length} ${unique.length === 1 ? 'ficha HubSpot' : 'fichas HubSpot'}`} />
+      <div style={{ padding: '0 32px 16px' }}>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Buscar por dueño, perro, email, teléfono..."
+          className="input"
+          style={{
+            width: '100%', padding: '10px 14px',
+            border: '1px solid rgba(33, 57, 44, 0.2)',
+            borderRadius: 8, fontSize: 14, fontFamily: 'inherit',
+          }}
+        />
+        {query && (
+          <div style={{ marginTop: 6, fontSize: 12, color: C.ink, opacity: 0.55 }}>
+            {filtered.length} {filtered.length === 1 ? 'resultado' : 'resultados'}
+          </div>
+        )}
+      </div>
+      <div style={{ padding: '0 32px 60px' }}>
+        {filtered.length === 0 ? (
+          <div style={{ padding: 28, background: 'rgba(33, 57, 44, 0.04)', borderRadius: 12, color: C.ink, opacity: 0.6, fontSize: 14, textAlign: 'center' }}>
+            {query ? 'Sin coincidencias.' : 'Sin fichas HubSpot.'}
+          </div>
+        ) : (
+          filtered.map((h) => <ClientRow key={h.id} h={h} />)
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ClientRow({ h }) {
+  const meta = [h.breed, h.size, h.sex, h.age && `${h.age} años`, h.weight && `${h.weight} kg`].filter(Boolean).join(' · ');
+  const contact = [h.email, h.phone, h.address].filter(Boolean).join(' · ');
+  return (
+    <div style={{
+      padding: '14px 18px', marginBottom: 8,
+      background: C.cream, border: '1px solid rgba(33, 57, 44, 0.12)',
+      borderRadius: 10,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 }}>
+        <div>
+          <span className="display" style={{ fontSize: 22, lineHeight: 1 }}>{h.pet || '—'}</span>
+          {h.guest && <span style={{ marginLeft: 8, fontSize: 13, opacity: 0.7 }}>· {h.guest}</span>}
+        </div>
+        {h.submittedAt && (
+          <span className="eyebrow eyebrow-sm" style={{ opacity: 0.5 }}>
+            Formulario: {h.submittedAt.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
+          </span>
+        )}
+      </div>
+      {meta && <div style={{ marginTop: 4, fontSize: 13, opacity: 0.85 }}>{meta}</div>}
+      {contact && <div style={{ marginTop: 3, fontSize: 12, opacity: 0.65 }}>{contact}</div>}
     </div>
   );
 }
 
 function TransportsView({ merged }) {
+  const jobs = useMemo(() => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const limit = new Date(today); limit.setDate(limit.getDate() + 7); limit.setHours(23, 59, 59, 999);
+    const out = [];
+    merged.forEach((r) => {
+      const products = String(r.products || '');
+      const hasIda = /transporte\s*ida/i.test(products);
+      const hasVuelta = /transporte\s*vuelta/i.test(products);
+      if (hasIda && r.arrival && r.arrival >= today && r.arrival <= limit) {
+        out.push({ kind: 'ida', time: r.arrival, r });
+      }
+      if (hasVuelta && r.departure && r.departure >= today && r.departure <= limit) {
+        out.push({ kind: 'vuelta', time: r.departure, r });
+      }
+    });
+    out.sort((a, b) => a.time.getTime() - b.time.getTime());
+    return out;
+  }, [merged]);
+
+  const byDay = useMemo(() => {
+    const groups = new Map();
+    jobs.forEach((j) => {
+      const k = dateKey(j.time);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(j);
+    });
+    return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [jobs]);
+
   return (
     <div>
-      <PageHeader title="Transportes" subtitle="Próximos 7 días" />
-      <ComingSoon note="Próximo paso: pickups (ida) y dropoffs (vuelta) agrupados por día con dirección del dueño." />
+      <PageHeader title="Transportes" subtitle={`Próximos 7 días · ${jobs.length} ${jobs.length === 1 ? 'servicio' : 'servicios'}`} />
+      {byDay.length === 0 ? (
+        <div style={{ margin: '0 32px 60px', padding: 28, background: 'rgba(33, 57, 44, 0.04)', borderRadius: 12, color: C.ink, opacity: 0.65, fontSize: 14, textAlign: 'center' }}>
+          Sin transportes programados en los próximos 7 días.
+        </div>
+      ) : (
+        <div style={{ padding: '0 32px 60px' }}>
+          {byDay.map(([dKey, dayJobs]) => <TransportDayBlock key={dKey} dKey={dKey} jobs={dayJobs} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TransportDayBlock({ dKey, jobs }) {
+  const date = new Date(dKey + 'T00:00:00');
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  let label;
+  if (date.getTime() === today.getTime()) label = 'Hoy';
+  else if (date.getTime() === tomorrow.getTime()) label = 'Mañana';
+  else label = `${WEEKDAY_ES[date.getDay()]} ${date.getDate()} ${MONTH_ES[date.getMonth()]}`;
+  return (
+    <section style={{ marginBottom: 24 }}>
+      <h3 className="display" style={{ fontSize: 22, color: C.ink, margin: '0 0 10px', textTransform: 'capitalize' }}>{label}</h3>
+      {jobs.map((j, i) => <TransportJobRow key={`${j.r.id}-${j.kind}-${i}`} job={j} />)}
+    </section>
+  );
+}
+
+function TransportJobRow({ job }) {
+  const { kind, time, r } = job;
+  const isIda = kind === 'ida';
+  const directionLabel = isIda ? 'Pickup · Ida' : 'Dropoff · Vuelta';
+  const accent = isIda ? C.celeste : C.lila;
+  const timeStr = `${pad2(time.getHours())}:${pad2(time.getMinutes())}`;
+  const showTime = !(time.getHours() === 0 && time.getMinutes() === 0);
+  const noAddress = !r.address;
+  const noPhone = !r.phone;
+  return (
+    <div style={{
+      padding: 14, marginBottom: 8,
+      background: C.cream,
+      border: `1px solid rgba(33, 57, 44, 0.12)`,
+      borderLeft: `4px solid ${accent}`,
+      borderRadius: 8,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <span className="eyebrow eyebrow-sm" style={{ color: accent === C.celeste ? C.ocre : C.lila, fontWeight: 700 }}>{directionLabel}</span>
+          <div style={{ marginTop: 3 }}>
+            <span className="display" style={{ fontSize: 20, lineHeight: 1 }}>{r.pet || '—'}</span>
+            <span style={{ marginLeft: 8, fontSize: 13, opacity: 0.7 }}>· {r.guest || '—'}</span>
+          </div>
+        </div>
+        {showTime && (
+          <span className="display tabular" style={{ fontSize: 22, color: C.ink }}>{timeStr}</span>
+        )}
+      </div>
+      <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.5 }}>
+        <div>
+          <span style={{ opacity: 0.6 }}>Tel:</span>{' '}
+          {noPhone
+            ? <span style={{ color: C.brick }}>Sin teléfono — pedir al cliente</span>
+            : <strong>{r.phone}</strong>}
+        </div>
+        <div>
+          <span style={{ opacity: 0.6 }}>{isIda ? 'Recogida en:' : 'Entrega en:'}</span>{' '}
+          {noAddress
+            ? <span style={{ color: C.brick }}>Sin dirección — falta ficha HubSpot o columna Dirección vacía</span>
+            : <strong>{r.address}</strong>}
+        </div>
+      </div>
     </div>
   );
 }
