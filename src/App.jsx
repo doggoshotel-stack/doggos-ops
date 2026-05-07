@@ -1781,6 +1781,9 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
         <OccupancyCells inHouse={inHouse.length} capacity={meta.capacity} />
       </section>
 
+      {/* 7-day occupancy forecast */}
+      <OccupancyForecast merged={merged} capacity={meta.capacity} now={now} />
+
       {/* Calendly strip — today + tomorrow */}
       <CalendlyStrip events={upcomingEvents} todayCount={eventsTodayCount} />
 
@@ -1867,6 +1870,186 @@ function OccupancyCells({ inHouse, capacity }) {
         }}/>
       ))}
     </div>
+  );
+}
+
+function OccupancyForecast({ merged, capacity, now }) {
+  const days = useMemo(() => {
+    const start = new Date(now); start.setHours(0, 0, 0, 0);
+    const out = [];
+    for (let i = 0; i < 7; i++) {
+      const d0 = new Date(start); d0.setDate(start.getDate() + i);
+      const d1 = new Date(d0);    d1.setDate(d0.getDate() + 1);
+      const k = dateKey(d0);
+      let arrivals = 0, departures = 0, stayovers = 0;
+      merged.forEach((r) => {
+        const aK = dateKey(r.arrival);
+        const dK = dateKey(r.departure);
+        if (aK === k) arrivals++;
+        if (dK === k) departures++;
+        if (r.arrival && r.departure && r.arrival < d0 && r.departure >= d1) stayovers++;
+      });
+      const customers = arrivals + stayovers;
+      out.push({ date: d0, arrivals, departures, stayovers, customers });
+    }
+    return out;
+  }, [merged, now]);
+
+  const cap = Math.max(capacity || 0, 1);
+  const maxCustomers = Math.max(cap, ...days.map((d) => d.customers));
+  const maxArrivals = Math.max(1, ...days.map((d) => d.arrivals), ...days.map((d) => d.departures));
+
+  // chart geometry
+  const W = 100, H = 36; // viewBox in % units (we use preserveAspectRatio="none")
+  const xOf = (i) => (i / (days.length - 1)) * W;
+
+  const occPts = days.map((d, i) => [xOf(i), H - (Math.min(d.customers, cap) / cap) * H]);
+  const arrPts = days.map((d, i) => [xOf(i), H - (d.arrivals / maxArrivals) * H]);
+
+  const smoothPath = (pts) => {
+    if (pts.length < 2) return '';
+    let p = `M ${pts[0][0]} ${pts[0][1]}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [x0, y0] = pts[i];
+      const [x1, y1] = pts[i + 1];
+      const cx = (x0 + x1) / 2;
+      p += ` C ${cx} ${y0}, ${cx} ${y1}, ${x1} ${y1}`;
+    }
+    return p;
+  };
+
+  const occPath = smoothPath(occPts);
+  const occArea = `${occPath} L ${W} ${H} L 0 ${H} Z`;
+  const arrPath = smoothPath(arrPts);
+
+  const todayK = todayKey();
+
+  return (
+    <section style={{ margin: '14px 32px 0', padding: '14px 18px 16px', borderRadius: 16, border: `1.5px solid ${C.ink}`, background: C.cream }}>
+      <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span className="eyebrow eyebrow-sm" style={{ opacity: 0.6 }}>Ocupación · próximos 7 días</span>
+          <h3 className="display" style={{ fontSize: 22, lineHeight: 1 }}>Previsión semanal</h3>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <span className="eyebrow eyebrow-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 14, height: 3, background: C.ink, borderRadius: 2 }} />
+            Huéspedes
+          </span>
+          <span className="eyebrow eyebrow-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 14, height: 3, background: C.celeste, borderRadius: 2 }} />
+            Llegadas
+          </span>
+          <span className="pastilla outline tabular eyebrow-sm">cap {cap}</span>
+        </div>
+      </header>
+
+      <div style={{ position: 'relative', height: 120, marginBottom: 10 }}>
+        {/* gridlines */}
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', pointerEvents: 'none' }}>
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div key={i} style={{ height: 1, background: C.ink15 }} />
+          ))}
+        </div>
+        {/* axis labels (left = customers, right = arrivals/departures) */}
+        <div style={{ position: 'absolute', left: -2, top: -6, bottom: -6, width: 28, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'flex-start', fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: C.ink, opacity: 0.5 }}>
+          <span>{maxCustomers}</span>
+          <span>{Math.round(maxCustomers / 2)}</span>
+          <span>0</span>
+        </div>
+        <div style={{ position: 'absolute', right: -2, top: -6, bottom: -6, width: 24, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'flex-end', fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: C.celeste, opacity: 0.85 }}>
+          <span>{maxArrivals}</span>
+          <span>{Math.round(maxArrivals / 2)}</span>
+          <span>0</span>
+        </div>
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ position: 'absolute', left: 30, right: 28, top: 0, bottom: 0, width: 'calc(100% - 58px)', height: '100%', overflow: 'visible' }}>
+          {/* arrival bars */}
+          {days.map((d, i) => {
+            const h = (d.arrivals / maxArrivals) * H;
+            const w = 1.2;
+            return (
+              <rect
+                key={`bar-${i}`}
+                x={xOf(i) - w / 2} y={H - h}
+                width={w} height={h}
+                fill={C.ink} opacity={0.35}
+              />
+            );
+          })}
+          {/* occupancy area + line */}
+          <path d={occArea} fill={C.ink} opacity={0.08} />
+          <path d={occPath} fill="none" stroke={C.ink} strokeWidth="0.7" vectorEffect="non-scaling-stroke" />
+          {/* arrivals line */}
+          <path d={arrPath} fill="none" stroke={C.celeste} strokeWidth="0.7" vectorEffect="non-scaling-stroke" strokeLinecap="round" />
+          {/* dots */}
+          {occPts.map(([x, y], i) => (
+            <circle key={`o-${i}`} cx={x} cy={y} r="0.9" fill={C.ink} vectorEffect="non-scaling-stroke" />
+          ))}
+          {arrPts.map(([x, y], i) => (
+            <circle key={`a-${i}`} cx={x} cy={y} r="0.7" fill={C.celeste} vectorEffect="non-scaling-stroke" />
+          ))}
+        </svg>
+      </div>
+
+      {/* day headers */}
+      <div style={{ display: 'grid', gridTemplateColumns: `90px repeat(${days.length}, 1fr)`, alignItems: 'center', gap: 4 }}>
+        <span />
+        {days.map((d, i) => {
+          const isToday = dateKey(d.date) === todayK;
+          const wd = d.date.toLocaleDateString('es-ES', { weekday: 'short' }).replace('.', '');
+          const dm = `${d.date.getDate()}/${d.date.getMonth() + 1}`;
+          return (
+            <div key={`hd-${i}`} style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <span className="eyebrow eyebrow-sm" style={{ opacity: isToday ? 1 : 0.55, color: isToday ? C.ink : C.ink, fontSize: 9 }}>
+                {wd}
+              </span>
+              <span className="tabular" style={{ fontSize: 11, fontWeight: isToday ? 700 : 400, opacity: isToday ? 1 : 0.7 }}>
+                {dm}
+              </span>
+            </div>
+          );
+        })}
+
+        {[
+          { label: 'Llegadas', key: 'arrivals', color: C.celeste },
+          { label: 'Salidas', key: 'departures', color: C.ocre },
+          { label: 'Estancias', key: 'stayovers', color: C.ink, dim: true },
+          { label: 'Huéspedes', key: 'customers', color: C.ink, bold: true },
+        ].map((row) => (
+          <FragmentRow key={row.key} row={row} days={days} todayK={todayK} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function FragmentRow({ row, days, todayK }) {
+  return (
+    <>
+      <span className="eyebrow eyebrow-sm" style={{ opacity: 0.6, fontSize: 10 }}>{row.label}</span>
+      {days.map((d, i) => {
+        const isToday = dateKey(d.date) === todayK;
+        const v = d[row.key];
+        return (
+          <span
+            key={`${row.key}-${i}`}
+            className="tabular"
+            style={{
+              textAlign: 'center',
+              fontSize: 13,
+              fontWeight: row.bold ? 700 : 400,
+              color: v === 0 ? C.ink : row.color,
+              opacity: row.dim && v === 0 ? 0.3 : v === 0 ? 0.35 : 1,
+              padding: '4px 0',
+              borderRadius: 6,
+              background: isToday ? 'rgba(33,57,44,0.06)' : 'transparent',
+            }}
+          >
+            {v}
+          </span>
+        );
+      })}
+    </>
   );
 }
 
