@@ -425,15 +425,20 @@ function mergeReservations(mewsList, hubspotList) {
       pathologies: h?.pathologies || [],
       medications: h?.medications || [],
       medicalNotes: h?.medicalNotes || '',
+      foodType: h?.foodType || '',
       foodBrand: h?.foodBrand || '',
       foodAmount: h?.foodAmount || '',
+      foodFrequency: h?.foodFrequency || '',
       foodSchedule: h?.foodSchedule || '',
+      treats: h?.treats || '',
       prohibitedFoods: h?.prohibitedFoods || '',
+      supplements: h?.supplements || '',
       rituals: h?.rituals || '',
       vetClinic: h?.vetClinic || '',
       vetPhone: h?.vetPhone || '',
       emergency1: h?.emergency1 || '',
       emergency2: h?.emergency2 || '',
+      submittedAt: h?.submittedAt || null,
       hubspotId: h?.id || null,
       _hasHubspot: !!h,
       _matchConfidence: confidence,
@@ -886,42 +891,279 @@ function ComingSoon({ note }) {
   );
 }
 
+/* ----------------------- detail card (arrivals/departures/in-house) ----------------------- */
+
+const WEEKDAY_ES = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+const MONTH_ES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+function fmtDateTime(d) {
+  if (!d) return '—';
+  const wd = WEEKDAY_ES[d.getDay()];
+  const day = d.getDate();
+  const mo = MONTH_ES[d.getMonth()];
+  const yr = d.getFullYear();
+  const hh = pad2(d.getHours());
+  const mm = pad2(d.getMinutes());
+  return `${wd} ${day} ${mo} ${yr}, ${hh}:${mm}`;
+}
+
+function splitProducts(productsStr) {
+  const items = String(productsStr || '')
+    .split(/[,;\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const transports = items.filter((s) => /^transporte/i.test(s));
+  const other = items.filter((s) => !/^transporte/i.test(s));
+  return { transports, other };
+}
+
+const CONFIDENCE_LABEL = { high: 'alto', medium: 'medio', low: 'bajo', none: 'sin match' };
+const CONFIDENCE_COLOR = { high: C.ocre, medium: C.celeste, low: C.lila, none: C.brick };
+
+function MetaCell({ label, value }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div className="eyebrow eyebrow-sm" style={{ color: C.ink, opacity: 0.55, marginBottom: 2 }}>{label}</div>
+      <div style={{ color: C.ink, fontWeight: 600, fontSize: 14, lineHeight: 1.3 }}>{value || '—'}</div>
+    </div>
+  );
+}
+
+function ProductPill({ label, on }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center',
+      padding: '4px 10px', borderRadius: 999,
+      background: on ? 'rgba(120, 217, 216, 0.25)' : 'rgba(33, 57, 44, 0.06)',
+      color: on ? C.ink : 'rgba(33, 57, 44, 0.5)',
+      border: `1px solid ${on ? C.celeste : 'rgba(33, 57, 44, 0.15)'}`,
+      fontSize: 12, fontWeight: 600,
+    }}>
+      {label}: {on ? 'Sí' : 'No'}
+    </span>
+  );
+}
+
+function ReservationDetailCard({ r }) {
+  const { transports, other } = splitProducts(r.products);
+  const hasTransport = transports.length > 0;
+  const hasOtherProducts = other.length > 0;
+  const hasNotes = !!(r.notes && r.notes.trim());
+  const hasHubspot = !!r._hasHubspot;
+  const confidence = r._matchConfidence || 'none';
+  const profileMeta = [
+    r.breed && ['Raza', r.breed],
+    r.size && ['Tamaño', r.size],
+    r.sex && ['Sexo', r.sex],
+    r.age && ['Edad', r.age],
+    r.weight && ['Peso (kg)', r.weight],
+  ].filter(Boolean);
+  const foodLines = [
+    r.foodType && ['Tipo', r.foodType],
+    r.foodBrand && ['Marca', r.foodBrand],
+    r.foodAmount && ['Cantidad diaria', r.foodAmount + (/\bg\b|gram/i.test(r.foodAmount) ? '' : ' g')],
+    r.foodFrequency && ['Frecuencia', r.foodFrequency],
+    r.foodSchedule && ['Horario', r.foodSchedule],
+    r.treats && ['Premios', r.treats],
+  ].filter(Boolean);
+  const allergiesText = r.allergies?.length > 0 ? r.allergies.join(', ') : 'Ninguna';
+  const conditionsText = r.pathologies?.length > 0 ? r.pathologies.join(', ') : 'Ninguna';
+  const neuteredText = r.sterilized === true ? 'Sí' : r.sterilized === false ? 'No' : '—';
+  const vetParts = [
+    r.vetClinic && ['Vet', r.vetClinic],
+    r.vetPhone && ['Tel.', r.vetPhone],
+    r.emergency1 && ['Emergencia 1', r.emergency1],
+    r.emergency2 && ['Emergencia 2', r.emergency2],
+  ].filter(Boolean);
+
+  return (
+    <article style={{
+      background: C.cream, color: C.ink,
+      border: `1px solid rgba(33, 57, 44, 0.15)`,
+      borderRadius: 14, padding: 22, marginBottom: 16,
+    }}>
+      {/* Title row */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 12 }}>
+        <h2 className="display" style={{ fontSize: 30, lineHeight: 1, margin: 0, letterSpacing: '0.02em' }}>
+          {(r.pet || r.guest || '—').toUpperCase()}
+        </h2>
+        <div style={{ fontSize: 14, opacity: 0.75 }}>
+          <span style={{ opacity: 0.6 }}>Dueño:</span> <strong>{r.guest || '—'}</strong>
+        </div>
+      </div>
+
+      {/* Meta cells */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+        gap: 16, marginTop: 14,
+      }}>
+        <MetaCell label="Entrada" value={fmtDateTime(r.arrival)} />
+        <MetaCell label="Salida" value={fmtDateTime(r.departure)} />
+        <MetaCell label="Habitación" value={r.spaceType} />
+        <MetaCell label="Reserva nº" value={r.confirmation} />
+      </div>
+
+      {/* Pills */}
+      <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+        <ProductPill label="Transporte" on={hasTransport} />
+        <ProductPill label="Otros productos" on={hasOtherProducts} />
+        {hasOtherProducts && (
+          <span style={{ fontSize: 12, color: C.ink, opacity: 0.55, alignSelf: 'center' }}>
+            ({other.join(', ')})
+          </span>
+        )}
+      </div>
+
+      {/* Booking notes (Mews) */}
+      {hasNotes && (
+        <div style={{
+          marginTop: 14, padding: '10px 14px',
+          background: 'rgba(245, 245, 61, 0.35)',
+          borderLeft: `3px solid ${C.ink}`,
+          borderRadius: 4, fontSize: 13.5, lineHeight: 1.4,
+        }}>
+          <strong>Notas de reserva (Mews):</strong> {r.notes}
+        </div>
+      )}
+
+      {/* Dog profile (HubSpot) */}
+      {hasHubspot ? (
+        <div style={{
+          marginTop: 14, padding: 16,
+          background: 'rgba(120, 217, 216, 0.13)',
+          border: '1px solid rgba(120, 217, 216, 0.5)',
+          borderRadius: 10,
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+            <strong style={{ fontSize: 15 }}>Ficha del perro</strong>
+            <span style={{ fontSize: 11, color: CONFIDENCE_COLOR[confidence], fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+              match HubSpot: {CONFIDENCE_LABEL[confidence]}
+            </span>
+          </div>
+
+          {profileMeta.length > 0 && (
+            <div style={{ fontSize: 13.5, marginBottom: 10 }}>
+              {profileMeta.map(([k, v], i) => (
+                <span key={k}>
+                  {i > 0 && <span style={{ opacity: 0.4, margin: '0 6px' }}>·</span>}
+                  <span style={{ opacity: 0.6 }}>{k}:</span> <strong>{v}</strong>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {foodLines.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <strong style={{ fontSize: 13.5 }}>Alimentación</strong>
+              <ul style={{ margin: '4px 0 0 18px', padding: 0, fontSize: 13 }}>
+                {foodLines.map(([k, v]) => (
+                  <li key={k}><span style={{ opacity: 0.65 }}>{k}:</span> {v}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div style={{
+            marginTop: 12, padding: '8px 12px',
+            background: 'rgba(162, 58, 42, 0.08)',
+            border: '1px solid rgba(162, 58, 42, 0.3)',
+            borderRadius: 6,
+          }}>
+            <div style={{ fontSize: 12, color: C.brick, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Alergias</div>
+            <div style={{ fontSize: 13.5 }}>{allergiesText}</div>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <strong style={{ fontSize: 13.5 }}>A vigilar</strong>
+            <ul style={{ margin: '4px 0 0 18px', padding: 0, fontSize: 13 }}>
+              <li><span style={{ opacity: 0.65 }}>Patologías:</span> {conditionsText}</li>
+              <li><span style={{ opacity: 0.65 }}>Esterilizado:</span> {neuteredText}</li>
+              {r.medicalNotes && <li><span style={{ opacity: 0.65 }}>Notas médicas:</span> {r.medicalNotes}</li>}
+              {r.prohibitedFoods && <li><span style={{ opacity: 0.65 }}>Alimentos prohibidos:</span> {r.prohibitedFoods}</li>}
+              {r.rituals && <li><span style={{ opacity: 0.65 }}>Rituales:</span> {r.rituals}</li>}
+            </ul>
+          </div>
+
+          {vetParts.length > 0 && (
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(33, 57, 44, 0.1)', fontSize: 12.5, opacity: 0.85 }}>
+              {vetParts.map(([k, v], i) => (
+                <span key={k}>
+                  {i > 0 && <span style={{ opacity: 0.4, margin: '0 6px' }}>·</span>}
+                  <span style={{ opacity: 0.6 }}>{k}:</span> {v}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {r.submittedAt && (
+            <div style={{ marginTop: 8, fontSize: 11, opacity: 0.55, fontStyle: 'italic' }}>
+              Formulario enviado: {fmtDateTime(r.submittedAt)}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{
+          marginTop: 14, padding: '12px 14px',
+          background: 'rgba(162, 58, 42, 0.08)',
+          border: `1px dashed ${C.brick}`,
+          borderRadius: 8, fontSize: 13.5, color: C.ink,
+        }}>
+          <strong style={{ color: C.brick }}>Sin ficha HubSpot.</strong>{' '}
+          Pedir al cliente que rellene el formulario de admisión antes de la entrada.
+        </div>
+      )}
+    </article>
+  );
+}
+
+function CardList({ items, emptyText }) {
+  if (items.length === 0) {
+    return (
+      <div style={{
+        margin: '0 32px', padding: 28,
+        background: 'rgba(33, 57, 44, 0.04)',
+        borderRadius: 12, color: C.ink, opacity: 0.65,
+        fontSize: 14, textAlign: 'center',
+      }}>
+        {emptyText}
+      </div>
+    );
+  }
+  return (
+    <div style={{ padding: '0 32px 60px' }}>
+      {items.map((r) => <ReservationDetailCard key={r.id} r={r} />)}
+    </div>
+  );
+}
+
 function ArrivalsTodayView({ merged }) {
   const today = todayKey();
-  const items = merged
-    .filter((r) => dateKey(r.arrival) === today)
-    .sort((a, b) => (a.arrival?.getTime() || 0) - (b.arrival?.getTime() || 0));
+  const items = useMemo(() =>
+    merged
+      .filter((r) => dateKey(r.arrival) === today)
+      .sort((a, b) => (a.arrival?.getTime() || 0) - (b.arrival?.getTime() || 0)),
+    [merged, today]
+  );
   return (
     <div>
       <PageHeader title="Llegadas hoy" subtitle={`${items.length} ${items.length === 1 ? 'reserva' : 'reservas'}`} />
-      <ComingSoon note="Próximo paso: tarjetas detalladas con perfil del perro (Mews + HubSpot)." />
-      <ul style={{ listStyle: 'none', padding: '16px 32px', margin: 0 }}>
-        {items.map((r) => (
-          <li key={r.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(33, 57, 44, 0.1)', color: C.ink, fontSize: 14 }}>
-            <strong>{r.pet || '—'}</strong> · {r.guest} · {r.arrival ? `${pad2(r.arrival.getHours())}:${pad2(r.arrival.getMinutes())}` : '—'}
-          </li>
-        ))}
-      </ul>
+      <CardList items={items} emptyText="Sin llegadas previstas hoy." />
     </div>
   );
 }
 
 function DeparturesTodayView({ merged }) {
   const today = todayKey();
-  const items = merged
-    .filter((r) => dateKey(r.departure) === today)
-    .sort((a, b) => (a.departure?.getTime() || 0) - (b.departure?.getTime() || 0));
+  const items = useMemo(() =>
+    merged
+      .filter((r) => dateKey(r.departure) === today)
+      .sort((a, b) => (a.departure?.getTime() || 0) - (b.departure?.getTime() || 0)),
+    [merged, today]
+  );
   return (
     <div>
       <PageHeader title="Salidas hoy" subtitle={`${items.length} ${items.length === 1 ? 'reserva' : 'reservas'}`} />
-      <ComingSoon note="Próximo paso: tarjetas detalladas y resumen de logística de salida." />
-      <ul style={{ listStyle: 'none', padding: '16px 32px', margin: 0 }}>
-        {items.map((r) => (
-          <li key={r.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(33, 57, 44, 0.1)', color: C.ink, fontSize: 14 }}>
-            <strong>{r.pet || '—'}</strong> · {r.guest} · {r.departure ? `${pad2(r.departure.getHours())}:${pad2(r.departure.getMinutes())}` : '—'}
-          </li>
-        ))}
-      </ul>
+      <CardList items={items} emptyText="Sin salidas previstas hoy." />
     </div>
   );
 }
@@ -936,14 +1178,7 @@ function InHouseView({ merged }) {
   return (
     <div>
       <PageHeader title="In-House" subtitle={`${items.length} ${items.length === 1 ? 'perro alojado' : 'perros alojados'}`} />
-      <ComingSoon note="Próximo paso: ficha completa por perro con notas de manejo, dieta y salidas." />
-      <ul style={{ listStyle: 'none', padding: '16px 32px', margin: 0 }}>
-        {items.map((r) => (
-          <li key={r.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(33, 57, 44, 0.1)', color: C.ink, fontSize: 14 }}>
-            <strong>{r.pet || '—'}</strong> · {r.guest} · sale {r.departure ? `${r.departure.getDate()} ${r.departure.toLocaleDateString('es-ES', { month: 'short' }).replace('.', '')}` : '—'}
-          </li>
-        ))}
-      </ul>
+      <CardList items={items} emptyText="Nadie alojado ahora mismo." />
     </div>
   );
 }
