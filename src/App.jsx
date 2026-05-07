@@ -1261,27 +1261,220 @@ function ClientsView({ merged, pending }) {
 }
 
 function ClientRow({ h }) {
+  const [expanded, setExpanded] = useState(false);
   const meta = [h.breed, h.size, h.sex, h.age && `${h.age} años`, h.weight && `${h.weight} kg`].filter(Boolean).join(' · ');
   const contact = [h.email, h.phone, h.address].filter(Boolean).join(' · ');
   return (
     <div style={{
-      padding: '14px 18px', marginBottom: 8,
+      marginBottom: 8,
       background: C.cream, border: '1px solid rgba(33, 57, 44, 0.12)',
-      borderRadius: 10,
+      borderRadius: 10, overflow: 'hidden',
     }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 }}>
-        <div>
-          <span className="display" style={{ fontSize: 22, lineHeight: 1 }}>{h.pet || '—'}</span>
-          {h.guest && <span style={{ marginLeft: 8, fontSize: 13, opacity: 0.7 }}>· {h.guest}</span>}
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        style={{
+          display: 'block', width: '100%', textAlign: 'left',
+          padding: '14px 18px',
+          background: expanded ? 'rgba(33, 57, 44, 0.04)' : 'transparent',
+          border: 'none', cursor: 'pointer', color: 'inherit', font: 'inherit',
+          transition: 'background 160ms ease',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span style={{
+              display: 'inline-block', width: 14,
+              transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+              transition: 'transform 160ms ease',
+              opacity: 0.55, fontSize: 12,
+            }}>›</span>
+            <span className="display" style={{ fontSize: 22, lineHeight: 1 }}>{h.pet || '—'}</span>
+            {h.guest && <span style={{ marginLeft: 4, fontSize: 13, opacity: 0.7 }}>· {h.guest}</span>}
+          </div>
+          {h.submittedAt && (
+            <span className="eyebrow eyebrow-sm" style={{ opacity: 0.5 }}>
+              Formulario: {h.submittedAt.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
+            </span>
+          )}
         </div>
-        {h.submittedAt && (
-          <span className="eyebrow eyebrow-sm" style={{ opacity: 0.5 }}>
-            Formulario: {h.submittedAt.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
-          </span>
+        {meta && <div style={{ marginTop: 4, marginLeft: 22, fontSize: 13, opacity: 0.85 }}>{meta}</div>}
+        {contact && <div style={{ marginTop: 3, marginLeft: 22, fontSize: 12, opacity: 0.65 }}>{contact}</div>}
+      </button>
+
+      {expanded && <ClientDetailPanel h={h} />}
+    </div>
+  );
+}
+
+function ClientDetailPanel({ h }) {
+  const yesNo = (v) => v === true ? 'Sí' : v === false ? 'No' : '—';
+  const sterilizedText = yesNo(h.sterilized);
+
+  const profile = [
+    ['Raza', h.breed], ['Tamaño', h.size], ['Sexo', h.sex],
+    ['Edad', h.age], ['Peso (kg)', h.weight], ['Fecha de nacimiento', h.birthDate],
+    ['Nº de chip', h.chip], ['Cartilla sanitaria', h.healthCard],
+    ['Esterilizado', sterilizedText], ['Última vacunación', h.lastVaccination],
+  ];
+  const contactRows = [
+    ['Email', h.email], ['Teléfono (WhatsApp)', h.phone],
+    ['Dirección', h.address], ['Recogida/entrega', h.pickup],
+  ];
+  const stay = [
+    ['Servicio', h.service],
+    ['Entrada', h.arrival ? fmtDateTime(h.arrival) : '—'],
+    ['Salida', h.departure ? fmtDateTime(h.departure) : '—'],
+    ['Transporte', yesNo(h.transport)],
+  ];
+  const food = [
+    ['Tipo', h.foodType], ['Marca', h.foodBrand], ['Cantidad diaria', h.foodAmount],
+    ['Frecuencia', h.foodFrequency], ['Horario', h.foodSchedule],
+    ['Premios', h.treats], ['Alimentos prohibidos', h.prohibitedFoods],
+    ['Suplementos', h.supplements],
+  ];
+  const vet = [
+    ['Clínica', h.vetClinic], ['Dirección clínica', h.vetAddress], ['Teléfono', h.vetPhone],
+    ['Aseguradora', h.insurer],
+    ['Emergencia 1', h.emergency1], ['Emergencia 2', h.emergency2],
+  ];
+  const authorizations = [
+    ['Tratamiento veterinario de urgencia', h.authorizedMedical],
+    ['Administración de medicación', h.authorizedMedication],
+    ['Transporte', h.authorizedTransport],
+    ['Uso de imágenes', h.authorizedImages],
+  ];
+
+  const allergiesText = h.allergies?.length > 0 ? h.allergies.join(', ') : 'Ninguna';
+  const pathologiesText = h.pathologies?.length > 0 ? h.pathologies.join(', ') : 'Ninguna';
+
+  return (
+    <div className="fade-in" style={{
+      borderTop: '1px solid rgba(33, 57, 44, 0.12)',
+      padding: '16px 18px 18px',
+      background: 'rgba(120, 217, 216, 0.06)',
+      display: 'flex', flexDirection: 'column', gap: 14,
+    }}>
+      <Section title="Contacto" rows={contactRows} />
+      <Section title="Perfil del perro" rows={profile} />
+      <Section title="Estancia" rows={stay} />
+
+      <div>
+        <SectionHeader>Salud</SectionHeader>
+        <div style={{
+          display: 'grid', gap: 8,
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+        }}>
+          <div style={{
+            padding: '8px 12px', borderRadius: 6,
+            background: 'rgba(162, 58, 42, 0.08)',
+            border: '1px solid rgba(162, 58, 42, 0.3)',
+          }}>
+            <div className="eyebrow eyebrow-sm" style={{ color: C.brick, marginBottom: 2 }}>Alergias</div>
+            <div style={{ fontSize: 13.5 }}>{allergiesText}</div>
+          </div>
+          <div style={{
+            padding: '8px 12px', borderRadius: 6,
+            background: 'rgba(33, 57, 44, 0.05)',
+            border: '1px solid rgba(33, 57, 44, 0.15)',
+          }}>
+            <div className="eyebrow eyebrow-sm" style={{ opacity: 0.65, marginBottom: 2 }}>Patologías</div>
+            <div style={{ fontSize: 13.5 }}>{pathologiesText}</div>
+          </div>
+        </div>
+        {h.medications?.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <div className="eyebrow eyebrow-sm" style={{ opacity: 0.65, marginBottom: 4 }}>Medicación</div>
+            <ul style={{ margin: '0 0 0 18px', padding: 0, fontSize: 13 }}>
+              {h.medications.map((m, i) => (
+                <li key={i}>
+                  <strong>{m.name}</strong>
+                  {m.dose && <> · {m.dose}</>}
+                  {m.schedule && <> · {m.schedule}</>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {h.medicalNotes && (
+          <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.45 }}>
+            <span style={{ opacity: 0.6 }}>Notas médicas:</span> {h.medicalNotes}
+          </div>
         )}
       </div>
-      {meta && <div style={{ marginTop: 4, fontSize: 13, opacity: 0.85 }}>{meta}</div>}
-      {contact && <div style={{ marginTop: 3, fontSize: 12, opacity: 0.65 }}>{contact}</div>}
+
+      <Section title="Alimentación" rows={food} />
+
+      {(h.rituals || h.notes) && (
+        <div>
+          <SectionHeader>Rituales y notas</SectionHeader>
+          {h.rituals && (
+            <div style={{ fontSize: 13, lineHeight: 1.45, marginBottom: 4 }}>
+              <span style={{ opacity: 0.6 }}>Rituales:</span> {h.rituals}
+            </div>
+          )}
+          {h.notes && (
+            <div style={{ fontSize: 13, lineHeight: 1.45 }}>
+              <span style={{ opacity: 0.6 }}>Observaciones:</span> {h.notes}
+            </div>
+          )}
+        </div>
+      )}
+
+      <Section title="Veterinario y emergencias" rows={vet} />
+
+      <div>
+        <SectionHeader>Autorizaciones</SectionHeader>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {authorizations.map(([label, on]) => (
+            <span key={label} style={{
+              display: 'inline-flex', alignItems: 'center',
+              padding: '4px 10px', borderRadius: 999,
+              background: on ? 'rgba(120, 217, 216, 0.25)' : 'rgba(162, 58, 42, 0.08)',
+              color: on ? C.ink : C.brick,
+              border: `1px solid ${on ? C.celeste : 'rgba(162, 58, 42, 0.3)'}`,
+              fontSize: 12, fontWeight: 600,
+            }}>
+              {label}: {yesNo(on)}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {(h.id || h.submittedAt) && (
+        <div style={{ marginTop: 4, fontSize: 11, opacity: 0.55, fontStyle: 'italic' }}>
+          {h.id && <>HubSpot ID: {h.id}</>}
+          {h.id && h.submittedAt && ' · '}
+          {h.submittedAt && <>Formulario enviado: {fmtDateTime(h.submittedAt)}</>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SectionHeader({ children }) {
+  return (
+    <div className="eyebrow eyebrow-sm" style={{ opacity: 0.55, marginBottom: 6 }}>{children}</div>
+  );
+}
+
+function Section({ title, rows }) {
+  const visible = rows.filter(([, v]) => v !== '' && v !== null && v !== undefined && v !== '—');
+  if (visible.length === 0) return null;
+  return (
+    <div>
+      <SectionHeader>{title}</SectionHeader>
+      <div style={{
+        display: 'grid', gap: '4px 16px',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+        fontSize: 13, lineHeight: 1.45,
+      }}>
+        {visible.map(([k, v]) => (
+          <div key={k}>
+            <span style={{ opacity: 0.6 }}>{k}:</span> <strong>{v}</strong>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
