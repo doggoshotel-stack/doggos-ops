@@ -1250,8 +1250,8 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
       {/* Calendly strip — today + tomorrow */}
       <CalendlyStrip events={upcomingEvents} todayCount={eventsTodayCount} />
 
-      {/* Three columns */}
-      <main style={{ flex: 1, padding: '20px 32px 100px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, minHeight: 0 }}>
+      {/* Four columns */}
+      <main style={{ flex: 1, padding: '20px 32px 100px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, minHeight: 0 }}>
         <Column title="Llegadas hoy" eyebrow="Check-in" count={arrivalsToday.length}>
           {arrivalsToday.length === 0
             ? <Empty>Sin llegadas previstas hoy</Empty>
@@ -1262,6 +1262,14 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
           {departuresToday.length === 0
             ? <Empty>Sin salidas previstas hoy</Empty>
             : departuresToday.map((r) => <GuestRow key={r.id} r={r} time={r.departure} variant="departure" />)}
+        </Column>
+
+        <Column title="In-House" eyebrow="Durmiendo" count={inHouse.length}>
+          {inHouse.length === 0
+            ? <Empty>Nadie alojado ahora mismo</Empty>
+            : [...inHouse]
+                .sort((a, b) => (a.departure?.getTime() || 0) - (b.departure?.getTime() || 0))
+                .map((r) => <GuestRow key={r.id} r={r} time={r.departure} variant="inhouse" />)}
         </Column>
 
         <Column title="Alertas activas" eyebrow="Atención" count={alertsList.length}>
@@ -1425,13 +1433,21 @@ function Column({ title, eyebrow, count, children }) {
 function GuestRow({ r, time, variant }) {
   const flags = detectAlerts(r);
   const tint = topAlertTint(flags);
-  const t = time ? `${pad2(time.getHours())}:${pad2(time.getMinutes())}` : '--';
+  const eyebrowLabel = (() => {
+    if (!time) return '--';
+    if (variant === 'inhouse') {
+      return `Sale ${time.getDate()} ${time.toLocaleDateString('es-ES', { month: 'short' }).replace('.', '')}`;
+    }
+    return `${pad2(time.getHours())}:${pad2(time.getMinutes())}`;
+  })();
+  const eyebrowIcon = variant === 'arrival' ? '↘' : variant === 'departure' ? '↗' : '●';
+  const eyebrowColor = variant === 'arrival' ? C.ink : variant === 'departure' ? C.ocre : C.celeste;
   const breedSize = [r.breed, r.size].filter(Boolean).join(' · ');
   return (
     <div className={`row fade-in ${tint}`}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-        <span className="eyebrow tabular" style={{ color: variant === 'arrival' ? C.ink : C.ocre }}>
-          {variant === 'arrival' ? '↘' : '↗'} {t}
+        <span className="eyebrow tabular" style={{ color: eyebrowColor }}>
+          {eyebrowIcon} {eyebrowLabel}
         </span>
         <span className="eyebrow eyebrow-sm" style={{ opacity: 0.55, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {r.spaceType || r.service}
