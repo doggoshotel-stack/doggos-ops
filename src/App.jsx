@@ -181,11 +181,22 @@ const dateKey = (d) => {
   if (isNaN(x.getTime())) return null;
   return `${x.getFullYear()}-${pad2(x.getMonth() + 1)}-${pad2(x.getDate())}`;
 };
+const SHEET_ERR_RE = /^#(REF|N\/A|VALUE|NAME|NUM|DIV\/0|ERROR|NULL|GETTING_DATA|SPILL)[!?]?$/i;
+const sanitizeText = (v) => {
+  if (v == null) return '';
+  const s = String(v).trim();
+  if (!s || SHEET_ERR_RE.test(s)) return '';
+  return s;
+};
+const MONTH_NAMES = {
+  ene:0, jan:0, feb:1, mar:2, abr:3, apr:3, may:4,
+  jun:5, jul:6, ago:7, aug:7, sep:8, oct:9, nov:10, dic:11, dec:11,
+};
 const parseDate = (v) => {
   if (!v) return null;
   if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
   const s = String(v).trim();
-  if (!s) return null;
+  if (!s || SHEET_ERR_RE.test(s)) return null;
   const iso = new Date(s);
   if (!isNaN(iso.getTime())) return iso;
   // DD/MM/YYYY or DD-MM-YYYY
@@ -195,6 +206,17 @@ const parseDate = (v) => {
     const yr = y.length === 2 ? 2000 + Number(y) : Number(y);
     const dt = new Date(yr, Number(mo) - 1, Number(d), Number(h || 0), Number(min || 0));
     if (!isNaN(dt.getTime())) return dt;
+  }
+  // Calendly format: "HH:MM - <weekday>, DD <Month> YYYY (timezone)"
+  const cal = s.match(/^(\d{1,2}):(\d{2})\s*-\s*\w+,?\s*(\d{1,2})\s+(\w+)\s+(\d{4})/i);
+  if (cal) {
+    const [, h, min, day, monStr, year] = cal;
+    const monKey = monStr.slice(0, 3).toLowerCase();
+    const month = MONTH_NAMES[monKey];
+    if (month != null) {
+      const dt = new Date(Number(year), month, Number(day), Number(h), Number(min));
+      if (!isNaN(dt.getTime())) return dt;
+    }
   }
   return null;
 };
@@ -230,6 +252,24 @@ const normName = (v) =>
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  if (!a || !b) return Math.max((a || '').length, (b || '').length);
+  if (Math.abs(a.length - b.length) > 2) return 99;
+  const n = b.length;
+  const dp = new Array(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
 const pct = (n) => `${Math.round(n)}%`;
 const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
 
@@ -277,6 +317,7 @@ function parseHubSpotRow(row) {
     guest: `${row.Nombre || ''} ${row.Apellidos || ''}`.trim(),
     email: normEmail(row.Correo || row['Contact email']),
     phone: row['Número de teléfono de WhatsApp'] || '',
+    address: sanitizeText(row.Dirección),
     pickup: row['Persona autorizada para recogida/entrega'] || '',
     pet: row['Nombre del perro'] || '',
     breed: row.Raza || '',
@@ -324,7 +365,7 @@ function parseHubSpotRow(row) {
 /* ----------------------- merge ----------------------- */
 
 function mergeReservations(mewsList, hubspotList) {
-  // Index HubSpot by email (most recent submission wins)
+  // Index HubSpot by email and by normalized name (most recent submission wins).
   const hubByEmail = new Map();
   const hubByName = new Map();
   for (const h of hubspotList) {
@@ -342,9 +383,32 @@ function mergeReservations(mewsList, hubspotList) {
       }
     }
   }
+  const hubNamesArr = Array.from(hubByName.entries()); // [name, record][] for fuzzy fallback
 
   const merged = mewsList.map((m) => {
-    const h = (m.email && hubByEmail.get(m.email)) || hubByName.get(normName(m.guest)) || null;
+    let h = null;
+    let confidence = 'none';
+    if (m.email && hubByEmail.has(m.email)) {
+      h = hubByEmail.get(m.email);
+      confidence = 'high';
+    } else {
+      const mNorm = normName(m.guest);
+      if (mNorm && hubByName.has(mNorm)) {
+        h = hubByName.get(mNorm);
+        confidence = 'medium';
+      } else if (mNorm) {
+        let best = null;
+        let bestDist = 3;
+        for (const [hubName, hubRec] of hubNamesArr) {
+          const d = levenshtein(mNorm, hubName);
+          if (d < bestDist) { bestDist = d; best = hubRec; }
+        }
+        if (best && bestDist <= 2) {
+          h = best;
+          confidence = 'low';
+        }
+      }
+    }
     return {
       ...m,
       pet: h?.pet || '',
@@ -353,6 +417,9 @@ function mergeReservations(mewsList, hubspotList) {
       weight: h?.weight || '',
       sex: h?.sex || '',
       age: h?.age || '',
+      address: h?.address || '',
+      phone: h?.phone || '',
+      sterilized: h?.sterilized,
       transport: h?.transport || false,
       allergies: h?.allergies || [],
       pathologies: h?.pathologies || [],
@@ -369,17 +436,21 @@ function mergeReservations(mewsList, hubspotList) {
       emergency2: h?.emergency2 || '',
       hubspotId: h?.id || null,
       _hasHubspot: !!h,
+      _matchConfidence: confidence,
       _hubspot: h || null,
     };
   });
 
-  // HubSpot records WITHOUT a Mews booking that have a future check-in date
+  // Pending: HubSpot records that didn't match any Mews booking and have a future check-in.
+  const matchedHubIds = new Set(merged.filter((r) => r._hubspot).map((r) => r._hubspot.id));
   const matchedEmails = new Set(merged.filter((r) => r._hasHubspot && r.email).map((r) => r.email));
   const matchedNames = new Set(merged.filter((r) => r._hasHubspot).map((r) => normName(r.guest)));
   const now = new Date();
   const pending = hubspotList.filter((h) => {
-    const matched = (h.email && matchedEmails.has(h.email)) || matchedNames.has(normName(h.guest));
-    return !matched && h.arrival && h.arrival >= now;
+    if (matchedHubIds.has(h.id)) return false;
+    if (h.email && matchedEmails.has(h.email)) return false;
+    if (matchedNames.has(normName(h.guest))) return false;
+    return h.arrival && h.arrival >= now;
   });
 
   return { merged, pending };
@@ -388,13 +459,14 @@ function mergeReservations(mewsList, hubspotList) {
 /* ----------------------- structured alerts ----------------------- */
 
 const ALERT_STYLES = {
-  medical:   { label: 'Médico',     pastilla: 'pastilla',         tint: 'amarillo-tint', priority: 0 },
-  allergy:   { label: 'Alergia',    pastilla: 'pastilla',         tint: 'amarillo-tint', priority: 1 },
-  pathology: { label: 'Patología',  pastilla: 'pastilla ocre',    tint: 'amarillo-tint', priority: 2 },
-  behavior:  { label: 'Manejo',     pastilla: 'pastilla ocre',    tint: '',              priority: 3 },
-  diet:      { label: 'Dieta',      pastilla: 'pastilla celeste', tint: 'celeste-tint',  priority: 4 },
-  transport: { label: 'Transporte', pastilla: 'pastilla celeste', tint: '',              priority: 5 },
-  vip:       { label: 'VIP',        pastilla: 'pastilla lila',    tint: '',              priority: 6 },
+  medical:   { label: 'Médico',          pastilla: 'pastilla',         tint: 'amarillo-tint', priority: 0 },
+  allergy:   { label: 'Alergia',         pastilla: 'pastilla',         tint: 'amarillo-tint', priority: 1 },
+  pathology: { label: 'Patología',       pastilla: 'pastilla ocre',    tint: 'amarillo-tint', priority: 2 },
+  neutered:  { label: 'No esterilizado', pastilla: 'pastilla ocre',    tint: '',              priority: 3 },
+  behavior:  { label: 'Manejo',          pastilla: 'pastilla ocre',    tint: '',              priority: 4 },
+  diet:      { label: 'Dieta',           pastilla: 'pastilla celeste', tint: 'celeste-tint',  priority: 5 },
+  transport: { label: 'Transporte',      pastilla: 'pastilla celeste', tint: '',              priority: 6 },
+  vip:       { label: 'VIP',             pastilla: 'pastilla lila',    tint: '',              priority: 7 },
 };
 
 function detectAlerts(record) {
@@ -415,6 +487,11 @@ function detectAlerts(record) {
   // Pathologies (structured)
   if (record.pathologies?.length > 0) {
     alerts.push({ type: 'pathology', detail: record.pathologies.join(', ') });
+  }
+
+  // Not neutered — only fires when we have HubSpot data that explicitly says no
+  if (record._hasHubspot && record.sterilized === false) {
+    alerts.push({ type: 'neutered', detail: 'Sin esterilizar' });
   }
 
   // Diet (structured)
@@ -631,8 +708,8 @@ function parseCalendlyRow(row, idx) {
     eventName,
     host: row.host || '',
     time: parseDate(row.event_time_raw),
-    location: row.location || '',
-    meetingUrl: row.meeting_url || '',
+    location: sanitizeText(row.location),
+    meetingUrl: sanitizeText(row.meeting_url),
     invitee: row.invitee_name || '',
     email: normEmail(row.invitee_email),
     customQuestions: row.custom_questions || '',
