@@ -925,6 +925,38 @@ function Sidebar({ route, collapsed, onToggle, isManagement, onLogout }) {
           );
         })}
 
+        {!isManagement && (
+          <>
+            <div style={{ flex: 1 }} />
+            <button
+              onClick={() => navigate('#/management')}
+              title={collapsed ? 'Management' : undefined}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: collapsed ? '12px 0' : '10px 12px',
+                justifyContent: collapsed ? 'center' : 'flex-start',
+                background: 'transparent', color: C.cream, opacity: 0.65,
+                border: '1px dashed rgba(234, 232, 221, 0.25)',
+                borderRadius: 8,
+                cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                whiteSpace: 'nowrap', overflow: 'hidden',
+                fontFamily: 'inherit', textAlign: 'left', width: '100%',
+                marginTop: 4,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.borderColor = C.amarillo; e.currentTarget.style.color = C.amarillo; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.65'; e.currentTarget.style.borderColor = 'rgba(234, 232, 221, 0.25)'; e.currentTarget.style.color = C.cream; }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', flex: 'none' }}>
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round">
+                  <rect x="4" y="9" width="12" height="8" rx="1" />
+                  <path d="M7 9 V6 C7 4.5 8 3 10 3 C12 3 13 4.5 13 6 V9" />
+                </svg>
+              </span>
+              {!collapsed && <span>Management</span>}
+            </button>
+          </>
+        )}
+
         {isManagement && (
           <>
             {!collapsed && (
