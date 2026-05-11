@@ -259,7 +259,18 @@ export default function MonthlyView({ reservations = [], capacity = 42, now = ne
                     {Math.round(d.pct * 100)}%
                   </span>
                 </div>
-                <div className="mv-cell-bottom" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                <div className="mv-cell-bottom" style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {d.occupancy > 0 && (
+                    <span
+                      title={`${d.occupancy} perro${d.occupancy === 1 ? '' : 's'} en casa`}
+                      style={{ background: C.ink, color: C.amarillo, fontSize: 13, fontWeight: 700, padding: '3px 10px', borderRadius: 999, letterSpacing: '0.04em', display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
+                        <path d="M3 17 L3 9 L10 3 L17 9 L17 17 Z" />
+                      </svg>
+                      {d.occupancy}
+                    </span>
+                  )}
                   {d.arrivals > 0 && (
                     <span style={{ background: C.amarillo, color: C.ink, fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 999, letterSpacing: '0.04em' }}>
                       ↓{d.arrivals}
@@ -287,6 +298,10 @@ export default function MonthlyView({ reservations = [], capacity = 42, now = ne
           </div>
         ))}
         <span style={{ width: 1, height: 18, background: C.ink15, margin: '0 4px' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ background: C.ink, color: C.amarillo, fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999 }}>N</span>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', opacity: 0.7 }}>En casa</span>
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ background: C.amarillo, color: C.ink, fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 999 }}>↓N</span>
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', opacity: 0.7 }}>Llegadas</span>
