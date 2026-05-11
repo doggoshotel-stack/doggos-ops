@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { storage } from './storage.js';
 import MonthlyView from './MonthlyView.jsx';
+import ManagementRouter, { ManagementLogin, checkMgmtAuth, clearMgmtAuth, MGMT_NAV } from './management/index.jsx';
 
 /* ============================================================
    DOGGOS · OPS DASHBOARD — v2 (Google Sheets sources)
@@ -703,6 +704,14 @@ function parseBridgeDate(v) {
   return isNaN(d.getTime()) ? null : d;
 }
 
+function parseBridgeAmount(v) {
+  if (v == null || v === '') return 0;
+  if (typeof v === 'number') return v;
+  const s = String(v).replace(/[€\s]/g, '').replace(/,/g, '.');
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+
 function parseBridgeRow(row) {
   return {
     number: row.Number,
@@ -714,6 +723,7 @@ function parseBridgeRow(row) {
     spaceCategory: row['Space category'] || '',
     nights: Number(row['Count (days)']) || 0,
     personCount: Number(row['Person count']) || 1,
+    totalAmount: parseBridgeAmount(row['Total amount']),
   };
 }
 
@@ -847,7 +857,7 @@ const NAV_ITEMS = [
   { hash: '#/transports',      label: 'Transportes',  icon: NAV_ICON.transports },
 ];
 
-function Sidebar({ route, collapsed, onToggle }) {
+function Sidebar({ route, collapsed, onToggle, isManagement, onLogout }) {
   const W = collapsed ? 64 : 220;
   return (
     <aside style={{
@@ -865,7 +875,17 @@ function Sidebar({ route, collapsed, onToggle }) {
         minHeight: 60,
       }}>
         {!collapsed && (
-          <span className="display" style={{ fontSize: 22, color: C.cream, lineHeight: 1 }}>doggos</span>
+          <span style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span className="display" style={{ fontSize: 22, color: C.cream, lineHeight: 1 }}>doggos</span>
+            {isManagement && (
+              <span
+                className="eyebrow"
+                style={{ background: C.amarillo, color: C.ink, fontSize: 9, padding: '2px 6px', borderRadius: 4, letterSpacing: '0.2em' }}
+              >
+                MGMT
+              </span>
+            )}
+          </span>
         )}
         <button
           onClick={onToggle}
@@ -879,7 +899,7 @@ function Sidebar({ route, collapsed, onToggle }) {
           {collapsed ? NAV_ICON.chevronRight : NAV_ICON.chevronLeft}
         </button>
       </div>
-      <nav style={{ display: 'flex', flexDirection: 'column', padding: '12px 8px', gap: 4, flex: 1 }}>
+      <nav style={{ display: 'flex', flexDirection: 'column', padding: '12px 8px', gap: 4, flex: 1, overflow: 'auto' }}>
         {NAV_ITEMS.map((item) => {
           const active = route === item.hash;
           return (
@@ -904,7 +924,101 @@ function Sidebar({ route, collapsed, onToggle }) {
             </button>
           );
         })}
+
+        {!isManagement && (
+          <>
+            <div style={{ flex: 1 }} />
+            <button
+              onClick={() => navigate('#/management')}
+              title={collapsed ? 'Management' : undefined}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: collapsed ? '12px 0' : '10px 12px',
+                justifyContent: collapsed ? 'center' : 'flex-start',
+                background: 'transparent', color: C.cream, opacity: 0.65,
+                border: '1px dashed rgba(234, 232, 221, 0.25)',
+                borderRadius: 8,
+                cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                whiteSpace: 'nowrap', overflow: 'hidden',
+                fontFamily: 'inherit', textAlign: 'left', width: '100%',
+                marginTop: 4,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.borderColor = C.amarillo; e.currentTarget.style.color = C.amarillo; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.65'; e.currentTarget.style.borderColor = 'rgba(234, 232, 221, 0.25)'; e.currentTarget.style.color = C.cream; }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', flex: 'none' }}>
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round">
+                  <rect x="4" y="9" width="12" height="8" rx="1" />
+                  <path d="M7 9 V6 C7 4.5 8 3 10 3 C12 3 13 4.5 13 6 V9" />
+                </svg>
+              </span>
+              {!collapsed && <span>Management</span>}
+            </button>
+          </>
+        )}
+
+        {isManagement && (
+          <>
+            {!collapsed && (
+              <div className="eyebrow eyebrow-sm" style={{ color: C.amarillo, opacity: 0.85, marginTop: 16, padding: '6px 12px', fontSize: 9, letterSpacing: '0.2em' }}>
+                MANAGEMENT
+              </div>
+            )}
+            {collapsed && <div style={{ height: 1, background: 'rgba(234, 232, 221, 0.15)', margin: '12px 8px' }} />}
+            {MGMT_NAV.map((item) => {
+              const active = route === item.hash || (item.hash === '#/management' && route.startsWith('#/management') && !MGMT_NAV.slice(1).some(o => route === o.hash));
+              return (
+                <button
+                  key={item.hash}
+                  onClick={() => navigate(item.hash)}
+                  title={collapsed ? item.label : undefined}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: collapsed ? '12px 0' : '10px 12px',
+                    justifyContent: collapsed ? 'center' : 'flex-start',
+                    background: active ? C.amarillo : 'transparent',
+                    color: active ? C.ink : C.cream,
+                    border: 'none', borderRadius: 8,
+                    cursor: 'pointer', fontSize: 13, fontWeight: 500,
+                    whiteSpace: 'nowrap', overflow: 'hidden',
+                    fontFamily: 'inherit', textAlign: 'left', width: '100%',
+                  }}
+                >
+                  <span style={{ width: 6, height: 6, background: active ? C.ink : C.amarillo, borderRadius: 999, flex: 'none' }} />
+                  {!collapsed && <span>{item.label}</span>}
+                </button>
+              );
+            })}
+          </>
+        )}
       </nav>
+
+      {isManagement && (
+        <div style={{ padding: collapsed ? '8px' : '12px 8px', borderTop: '1px solid rgba(234, 232, 221, 0.15)' }}>
+          <button
+            onClick={onLogout}
+            title={collapsed ? 'Salir de Management' : undefined}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: collapsed ? '10px 0' : '10px 12px',
+              justifyContent: collapsed ? 'center' : 'flex-start',
+              background: 'transparent',
+              color: C.cream, opacity: 0.7,
+              border: '1px solid rgba(234, 232, 221, 0.25)',
+              borderRadius: 8,
+              cursor: 'pointer', fontSize: 12, fontWeight: 700,
+              letterSpacing: '0.12em', textTransform: 'uppercase',
+              fontFamily: 'inherit', width: '100%',
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M12 4 L4 4 L4 16 L12 16" />
+              <path d="M9 10 L17 10 M14 7 L17 10 L14 13" />
+            </svg>
+            {!collapsed && <span>Salir</span>}
+          </button>
+        </div>
+      )}
     </aside>
   );
 }
@@ -1628,6 +1742,10 @@ function TransportJobRow({ job }) {
 export default function App() {
   const route = useRoute();
   const isAdmin = route === '#admin';
+  const isMgmtRoute = route.startsWith('#/management');
+  const isMgmtLogin = route === '#/management/login';
+  const [mgmtAuthed, setMgmtAuthed] = useState(() => checkMgmtAuth());
+  useEffect(() => { setMgmtAuthed(checkMgmtAuth()); }, [route]);
   const [collapsed, setCollapsed] = useState(getInitialSidebarCollapsed);
   const [config, setConfig] = useState(DEFAULT_CONFIG);
   const [meta, setMeta] = useState({ capacity: 42, lastUpdated: null });
@@ -1891,47 +2009,89 @@ export default function App() {
   const isConfigured = !!(config.mewsUrl || config.hubspotUrl || config.calendlyUrl || config.bridgeUrl);
   const sidebarWidth = collapsed ? 64 : 220;
 
-  let routeBody;
-  switch (route) {
-    case '#/arrivals/today':
-      routeBody = <ArrivalsTodayView merged={merged} />;
-      break;
-    case '#/departures/today':
-      routeBody = <DeparturesTodayView merged={merged} />;
-      break;
-    case '#/inhouse':
-      routeBody = <InHouseView merged={merged} />;
-      break;
-    case '#/mensual':
-      routeBody = <MonthlyView reservations={bridgeReservations} capacity={meta.capacity} now={now} error={fetchErrors.bridge} configured={!!config.bridgeUrl} />;
-      break;
-    case '#/clients':
-      routeBody = <ClientsView hubspot={hubspot} merged={merged} pending={pending} />;
-      break;
-    case '#/transports':
-      routeBody = <TransportsView merged={merged} />;
-      break;
-    case '#/dashboard':
-    default:
-      routeBody = (
-        <KioskView
-          merged={merged}
-          pending={pending}
-          calendlyEvents={calendlyEvents}
-          meta={meta}
-          now={now}
-          refreshing={refreshing}
-          fetchErrors={fetchErrors}
-          isConfigured={isConfigured}
-          onSwitchMode={switchMode}
-        />
-      );
+  // Management login page renders without the regular sidebar.
+  if (isMgmtLogin) {
+    return (
+      <div className="doggos-app" style={{ minHeight: '100vh' }}>
+        <style>{STYLES}</style>
+        <ManagementLogin onSuccess={() => { setMgmtAuthed(true); navigate('#/management'); }} />
+      </div>
+    );
   }
+  // Management routes require auth; otherwise redirect to login.
+  if (isMgmtRoute && !mgmtAuthed) {
+    return (
+      <div className="doggos-app" style={{ minHeight: '100vh' }}>
+        <style>{STYLES}</style>
+        <ManagementLogin onSuccess={() => { setMgmtAuthed(true); navigate('#/management'); }} />
+      </div>
+    );
+  }
+
+  let routeBody;
+  if (isMgmtRoute) {
+    routeBody = (
+      <ManagementRouter
+        route={route}
+        reservations={bridgeReservations}
+        capacity={meta.capacity}
+        now={now}
+      />
+    );
+  } else {
+    switch (route) {
+      case '#/arrivals/today':
+        routeBody = <ArrivalsTodayView merged={merged} />;
+        break;
+      case '#/departures/today':
+        routeBody = <DeparturesTodayView merged={merged} />;
+        break;
+      case '#/inhouse':
+        routeBody = <InHouseView merged={merged} />;
+        break;
+      case '#/mensual':
+        routeBody = <MonthlyView reservations={bridgeReservations} capacity={meta.capacity} now={now} error={fetchErrors.bridge} configured={!!config.bridgeUrl} />;
+        break;
+      case '#/clients':
+        routeBody = <ClientsView hubspot={hubspot} merged={merged} pending={pending} />;
+        break;
+      case '#/transports':
+        routeBody = <TransportsView merged={merged} />;
+        break;
+      case '#/dashboard':
+      default:
+        routeBody = (
+          <KioskView
+            merged={merged}
+            pending={pending}
+            calendlyEvents={calendlyEvents}
+            meta={meta}
+            now={now}
+            refreshing={refreshing}
+            fetchErrors={fetchErrors}
+            isConfigured={isConfigured}
+            onSwitchMode={switchMode}
+          />
+        );
+    }
+  }
+
+  const handleLogout = () => {
+    clearMgmtAuth();
+    setMgmtAuthed(false);
+    navigate('#/dashboard');
+  };
 
   return (
     <div className="doggos-app" style={{ minHeight: '100vh', position: 'relative' }}>
       <style>{STYLES}</style>
-      <Sidebar route={route} collapsed={collapsed} onToggle={toggleSidebar} />
+      <Sidebar
+        route={route}
+        collapsed={collapsed}
+        onToggle={toggleSidebar}
+        isManagement={isMgmtRoute && mgmtAuthed}
+        onLogout={handleLogout}
+      />
       <div style={{ paddingLeft: sidebarWidth, transition: 'padding-left 200ms ease', minHeight: '100vh', position: 'relative' }}>
         {routeBody}
       </div>
