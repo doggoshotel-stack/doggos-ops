@@ -449,12 +449,12 @@ function DaySection({ title, count, pillBg, arrow, items, timeKey }) {
 function KPI({ label, value, sub }) {
   return (
     <div className="tile dark" style={{ padding: 20 }}>
-      <div className="eyebrow eyebrow-sm" style={{ opacity: 0.7 }}>{label}</div>
+      <div className="eyebrow eyebrow-sm" style={{ color: C.cream, opacity: 0.7 }}>{label}</div>
       <div className="display tabular mv-kpi-value" style={{ fontSize: 44, lineHeight: 1, marginTop: 8, color: C.amarillo }}>
         {value}
       </div>
       {sub && (
-        <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6, marginTop: 6 }}>{sub}</div>
+        <div className="eyebrow eyebrow-sm" style={{ color: C.cream, opacity: 0.55, marginTop: 6 }}>{sub}</div>
       )}
     </div>
   );
