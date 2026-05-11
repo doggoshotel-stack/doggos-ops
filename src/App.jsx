@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { storage } from './storage.js';
+import MonthlyView from './MonthlyView.jsx';
 
 /* ============================================================
    DOGGOS · OPS DASHBOARD — v2 (Google Sheets sources)
@@ -690,7 +691,31 @@ const DEFAULT_CONFIG = {
   hubspotKey: '',
   calendlyUrl: '',
   calendlyKey: '',
+  bridgeUrl: '',
+  bridgeKey: '',
 };
+
+const BRIDGE_VALID_STATUS = new Set(['Checked out', 'Checked in', 'Confirmed', 'Started', 'Processed']);
+
+function parseBridgeDate(v) {
+  if (v == null || v === '') return null;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function parseBridgeRow(row) {
+  return {
+    number: row.Number,
+    customer: `${row['First name'] || ''} ${row['Last name'] || ''}`.trim() || row['Group name'] || '',
+    status: row.Status || '',
+    arrival: parseBridgeDate(row.Arrival),
+    departure: parseBridgeDate(row.Departure),
+    spaceNumber: row['Space number'] != null ? String(row['Space number']) : '',
+    spaceCategory: row['Space category'] || '',
+    nights: Number(row['Count (days)']) || 0,
+    personCount: Number(row['Person count']) || 1,
+  };
+}
 
 /* ----------------------- Calendly parsing + classification ----------------------- */
 
@@ -797,6 +822,13 @@ const NAV_ICON = {
       <path d="M8 17 L8 12 L12 12 L12 17" />
     </svg>
   ),
+  monthly: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+      <rect x="2.5" y="4.5" width="15" height="13" rx="1" />
+      <path d="M2.5 8.5 L17.5 8.5" />
+      <path d="M6.5 2.5 L6.5 5.5 M13.5 2.5 L13.5 5.5" />
+    </svg>
+  ),
   chevronLeft: (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 3 L4 8 L10 13" /></svg>
   ),
@@ -810,6 +842,7 @@ const NAV_ITEMS = [
   { hash: '#/arrivals/today',  label: 'Llegadas hoy', icon: NAV_ICON.arrivals },
   { hash: '#/departures/today',label: 'Salidas hoy',  icon: NAV_ICON.departures },
   { hash: '#/inhouse',         label: 'In-House',     icon: NAV_ICON.inhouse },
+  { hash: '#/mensual',         label: 'Vista mensual',icon: NAV_ICON.monthly },
   { hash: '#/clients',         label: 'Clientes',     icon: NAV_ICON.clients },
   { hash: '#/transports',      label: 'Transportes',  icon: NAV_ICON.transports },
 ];
@@ -1605,7 +1638,8 @@ export default function App() {
   const [pending, setPending] = useState([]);
   const [hubspot, setHubspot] = useState([]);
   const [calendlyEvents, setCalendlyEvents] = useState([]);
-  const [fetchErrors, setFetchErrors] = useState({ mews: null, hubspot: null, calendly: null });
+  const [bridgeReservations, setBridgeReservations] = useState([]);
+  const [fetchErrors, setFetchErrors] = useState({ mews: null, hubspot: null, calendly: null, bridge: null });
 
   /* ---- load config + cache ---- */
   const loadConfig = useCallback(async () => {
@@ -1642,6 +1676,12 @@ export default function App() {
           receivedAt: e.receivedAt ? new Date(e.receivedAt) : null,
         }));
         setCalendlyEvents(calRehydrated);
+        const bridgeRehydrated = (cache.bridge || []).map((r) => ({
+          ...r,
+          arrival: r.arrival ? new Date(r.arrival) : null,
+          departure: r.departure ? new Date(r.departure) : null,
+        }));
+        setBridgeReservations(bridgeRehydrated);
       }
     } catch {}
   }, []);
@@ -1649,10 +1689,11 @@ export default function App() {
   /* ---- fetch + merge from sources ---- */
   const refresh = useCallback(async (cfg = config) => {
     setRefreshing(true);
-    const errors = { mews: null, hubspot: null, calendly: null };
+    const errors = { mews: null, hubspot: null, calendly: null, bridge: null };
     let mewsRows = [];
     let hubspotRows = [];
     let calendlyRows = [];
+    let bridgeRows = [];
 
     if (cfg.mewsUrl) {
       try {
@@ -1678,16 +1719,30 @@ export default function App() {
         errors.calendly = e.message;
       }
     }
+    if (cfg.bridgeUrl) {
+      try {
+        const url = `${cfg.bridgeUrl}${cfg.bridgeUrl.includes('?') ? '&' : '?'}key=${encodeURIComponent(cfg.bridgeKey || '')}&sheet=reservations`;
+        const res = await fetch(url, { redirect: 'follow' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data?.error) throw new Error(`Apps Script: ${data.error}`);
+        if (!Array.isArray(data?.rows)) throw new Error('Respuesta sin rows');
+        bridgeRows = data.rows.map(parseBridgeRow);
+      } catch (e) {
+        errors.bridge = e.message;
+      }
+    }
 
     const { merged: mergedRows, pending: pendingRows } = mergeReservations(mewsRows, hubspotRows);
     setMerged(mergedRows);
     setPending(pendingRows);
     setHubspot(hubspotRows);
     setCalendlyEvents(calendlyRows);
+    setBridgeReservations(bridgeRows);
     setFetchErrors(errors);
 
     // Save to cache for resilience
-    if (mergedRows.length > 0 || pendingRows.length > 0 || hubspotRows.length > 0 || calendlyRows.length > 0) {
+    if (mergedRows.length > 0 || pendingRows.length > 0 || hubspotRows.length > 0 || calendlyRows.length > 0 || bridgeRows.length > 0) {
       const cache = {
         merged: mergedRows.map((r) => ({
           ...r,
@@ -1707,6 +1762,11 @@ export default function App() {
           ...e,
           time: e.time?.toISOString() || null,
           receivedAt: e.receivedAt?.toISOString() || null,
+        })),
+        bridge: bridgeRows.map((r) => ({
+          ...r,
+          arrival: r.arrival?.toISOString() || null,
+          departure: r.departure?.toISOString() || null,
         })),
       };
       try {
@@ -1733,7 +1793,7 @@ export default function App() {
   const didInitialFetch = useRef(false);
   useEffect(() => {
     if (loading || didInitialFetch.current) return;
-    if (config.mewsUrl || config.hubspotUrl || config.calendlyUrl) {
+    if (config.mewsUrl || config.hubspotUrl || config.calendlyUrl || config.bridgeUrl) {
       didInitialFetch.current = true;
       refresh(config);
     }
@@ -1742,7 +1802,7 @@ export default function App() {
   // Auto-refresh every 60s on any non-admin route (only if any source is configured)
   useEffect(() => {
     if (isAdmin) return;
-    if (!config.mewsUrl && !config.hubspotUrl && !config.calendlyUrl) return;
+    if (!config.mewsUrl && !config.hubspotUrl && !config.calendlyUrl && !config.bridgeUrl) return;
     const id = setInterval(() => refresh(config), 60000);
     return () => clearInterval(id);
   }, [isAdmin, config, refresh]);
@@ -1788,7 +1848,8 @@ export default function App() {
     setMerged([]);
     setPending([]);
     setCalendlyEvents([]);
-    setFetchErrors({ mews: null, hubspot: null, calendly: null });
+    setBridgeReservations([]);
+    setFetchErrors({ mews: null, hubspot: null, calendly: null, bridge: null });
     await storage.delete(STORAGE_KEYS.cache, true);
   };
 
@@ -1813,6 +1874,7 @@ export default function App() {
           merged={merged}
           pending={pending}
           calendlyEvents={calendlyEvents}
+          bridgeReservations={bridgeReservations}
           fetchErrors={fetchErrors}
           refreshing={refreshing}
           onSaveConfig={saveConfig}
@@ -1826,7 +1888,7 @@ export default function App() {
     );
   }
 
-  const isConfigured = !!(config.mewsUrl || config.hubspotUrl || config.calendlyUrl);
+  const isConfigured = !!(config.mewsUrl || config.hubspotUrl || config.calendlyUrl || config.bridgeUrl);
   const sidebarWidth = collapsed ? 64 : 220;
 
   let routeBody;
@@ -1839,6 +1901,9 @@ export default function App() {
       break;
     case '#/inhouse':
       routeBody = <InHouseView merged={merged} />;
+      break;
+    case '#/mensual':
+      routeBody = <MonthlyView reservations={bridgeReservations} capacity={meta.capacity} now={now} error={fetchErrors.bridge} configured={!!config.bridgeUrl} />;
       break;
     case '#/clients':
       routeBody = <ClientsView hubspot={hubspot} merged={merged} pending={pending} />;
@@ -2535,7 +2600,7 @@ function Empty({ children }) {
    ADMIN VIEW
    ============================================================ */
 
-function AdminView({ config, meta, merged, pending, calendlyEvents, fetchErrors, refreshing, onSaveConfig, onSaveCapacity, onRefresh, onLoadDemo, onClearCache, onSwitchMode }) {
+function AdminView({ config, meta, merged, pending, calendlyEvents, bridgeReservations, fetchErrors, refreshing, onSaveConfig, onSaveCapacity, onRefresh, onLoadDemo, onClearCache, onSwitchMode }) {
   const [draft, setDraft] = useState(config);
   const [capInput, setCapInput] = useState(meta.capacity);
   const [showScript, setShowScript] = useState(false);
@@ -2573,7 +2638,7 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, fetchErrors,
             Si necesitas la plantilla del script, ábrela debajo.
           </p>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16, marginBottom: 16 }}>
             <SourceField
               title="Mews · Reservas"
               eyebrow="Origen 1"
@@ -2606,13 +2671,24 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, fetchErrors,
               onKeyChange={(v) => setDraft({ ...draft, calendlyKey: v })}
               tone="lila"
             />
+            <SourceField
+              title="Mews Bridge · Vista mensual"
+              eyebrow="Origen 4"
+              status={bridgeReservations.length > 0 ? `${bridgeReservations.length} reservas` : 'sin datos'}
+              error={fetchErrors.bridge}
+              urlValue={draft.bridgeUrl}
+              keyValue={draft.bridgeKey}
+              onUrlChange={(v) => setDraft({ ...draft, bridgeUrl: v })}
+              onKeyChange={(v) => setDraft({ ...draft, bridgeKey: v })}
+              tone="ocre"
+            />
           </div>
 
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <button onClick={() => onSaveConfig(draft)} disabled={!dirty} className="btn">
               Guardar configuración
             </button>
-            <button onClick={onRefresh} disabled={refreshing || (!draft.mewsUrl && !draft.hubspotUrl && !draft.calendlyUrl)} className="btn celeste">
+            <button onClick={onRefresh} disabled={refreshing || (!draft.mewsUrl && !draft.hubspotUrl && !draft.calendlyUrl && !draft.bridgeUrl)} className="btn celeste">
               {refreshing ? 'Actualizando…' : 'Probar / actualizar ahora'}
             </button>
             {dirty && <span className="eyebrow eyebrow-sm" style={{ color: C.brick }}>cambios sin guardar</span>}
@@ -2675,11 +2751,12 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, fetchErrors,
         <div className="tile" style={{ padding: 24, marginTop: 20 }}>
           <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6 }}>Estado</div>
           <h3 className="display" style={{ fontSize: 28, lineHeight: 1, marginTop: 4, marginBottom: 16 }}>Datos en sistema</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 24 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 24 }}>
             <StatusItem label="Reservas (Mews)" value={String(merged.length)} />
             <StatusItem label="Por confirmar" value={String(pending.length)} />
             <StatusItem label="Con dossier HubSpot" value={String(merged.filter((r) => r._hasHubspot).length)} />
             <StatusItem label="Citas (Calendly)" value={String(calendlyEvents.length)} />
+            <StatusItem label="Reservas (Bridge)" value={String(bridgeReservations.length)} />
             <StatusItem label="Capacidad" value={String(meta.capacity)} />
           </div>
         </div>
@@ -2709,6 +2786,7 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, fetchErrors,
 function SourceField({ title, eyebrow, status, error, urlValue, keyValue, onUrlChange, onKeyChange, tone = 'amarillo' }) {
   const bg = tone === 'celeste' ? 'rgba(120, 217, 216, 0.08)'
            : tone === 'lila'    ? 'rgba(173, 149, 230, 0.10)'
+           : tone === 'ocre'    ? 'rgba(191, 178, 0, 0.10)'
            :                      'rgba(245, 245, 61, 0.08)';
   return (
     <div style={{ border: `1.5px solid ${C.ink}`, borderRadius: 16, padding: 20, background: bg }}>
