@@ -826,6 +826,13 @@ const NAV_ICON = {
       <circle cx="14" cy="15" r="1.5" fill="currentColor" stroke="none" />
     </svg>
   ),
+  grooming: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+      <circle cx="5.5" cy="5.5" r="2.5" />
+      <circle cx="5.5" cy="14.5" r="2.5" />
+      <path d="M7.5 7.5 L17.5 17.5 M7.5 12.5 L17.5 2.5" />
+    </svg>
+  ),
   inhouse: (
     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
       <path d="M3 17 L3 9 L10 3 L17 9 L17 17 Z" />
@@ -855,6 +862,7 @@ const NAV_ITEMS = [
   { hash: '#/mensual',         label: 'Vista mensual',icon: NAV_ICON.monthly },
   { hash: '#/clients',         label: 'Clientes',     icon: NAV_ICON.clients },
   { hash: '#/transports',      label: 'Transportes',  icon: NAV_ICON.transports },
+  { hash: '#/grooming',        label: 'Peluquería',   icon: NAV_ICON.grooming },
 ];
 
 function Sidebar({ route, collapsed, onToggle, isManagement, onLogout }) {
@@ -1739,6 +1747,108 @@ function TransportJobRow({ job }) {
   );
 }
 
+function GroomingView({ merged }) {
+  const jobs = useMemo(() => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const limit = new Date(today); limit.setDate(limit.getDate() + 7); limit.setHours(23, 59, 59, 999);
+    const out = [];
+    merged.forEach((r) => {
+      const items = String(r.products || '')
+        .split(/[,;\n]/)
+        .map((s) => s.trim())
+        .filter((s) => /lavado|peluquer[íi]a/i.test(s));
+      if (items.length === 0) return;
+      if (!r.departure || r.departure < today || r.departure > limit) return;
+      out.push({ time: r.departure, items, r });
+    });
+    out.sort((a, b) => a.time.getTime() - b.time.getTime());
+    return out;
+  }, [merged]);
+
+  const byDay = useMemo(() => {
+    const groups = new Map();
+    jobs.forEach((j) => {
+      const k = dateKey(j.time);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(j);
+    });
+    return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [jobs]);
+
+  return (
+    <div>
+      <PageHeader title="Peluquería" subtitle={`Próximos 7 días · ${jobs.length} ${jobs.length === 1 ? 'servicio' : 'servicios'}`} />
+      {byDay.length === 0 ? (
+        <div style={{ margin: '0 32px 60px', padding: 28, background: 'rgba(33, 57, 44, 0.04)', borderRadius: 12, color: C.ink, opacity: 0.65, fontSize: 14, textAlign: 'center' }}>
+          Sin servicios de peluquería programados en los próximos 7 días.
+        </div>
+      ) : (
+        <div style={{ padding: '0 32px 60px' }}>
+          {byDay.map(([dKey, dayJobs]) => <GroomingDayBlock key={dKey} dKey={dKey} jobs={dayJobs} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GroomingDayBlock({ dKey, jobs }) {
+  const date = new Date(dKey + 'T00:00:00');
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  let label;
+  if (date.getTime() === today.getTime()) label = 'Hoy';
+  else if (date.getTime() === tomorrow.getTime()) label = 'Mañana';
+  else label = `${WEEKDAY_ES[date.getDay()]} ${date.getDate()} ${MONTH_ES[date.getMonth()]}`;
+  return (
+    <section style={{ marginBottom: 24 }}>
+      <h3 className="display" style={{ fontSize: 22, color: C.ink, margin: '0 0 10px', textTransform: 'capitalize' }}>{label}</h3>
+      {jobs.map((j, i) => <GroomingJobRow key={`${j.r.id}-${i}`} job={j} />)}
+    </section>
+  );
+}
+
+function GroomingJobRow({ job }) {
+  const { time, items, r } = job;
+  const accent = C.lila;
+  const timeStr = `${pad2(time.getHours())}:${pad2(time.getMinutes())}`;
+  const showTime = !(time.getHours() === 0 && time.getMinutes() === 0);
+  const noPhone = !r.phone;
+  return (
+    <div style={{
+      padding: 14, marginBottom: 8,
+      background: C.cream,
+      border: `1px solid rgba(33, 57, 44, 0.12)`,
+      borderLeft: `4px solid ${accent}`,
+      borderRadius: 8,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <span className="eyebrow eyebrow-sm" style={{ color: C.lila, fontWeight: 700 }}>Salida · Peluquería</span>
+          <div style={{ marginTop: 3 }}>
+            <span className="display" style={{ fontSize: 20, lineHeight: 1 }}>{r.pet || '—'}</span>
+            <span style={{ marginLeft: 8, fontSize: 13, opacity: 0.7 }}>· {r.guest || '—'}</span>
+          </div>
+        </div>
+        {showTime && (
+          <span className="display tabular" style={{ fontSize: 22, color: C.ink }}>{timeStr}</span>
+        )}
+      </div>
+      <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.5 }}>
+        <div>
+          <span style={{ opacity: 0.6 }}>Servicio:</span>{' '}
+          <strong>{items.join(', ')}</strong>
+        </div>
+        <div>
+          <span style={{ opacity: 0.6 }}>Tel:</span>{' '}
+          {noPhone
+            ? <span style={{ color: C.brick }}>Sin teléfono — pedir al cliente</span>
+            : <strong>{r.phone}</strong>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const route = useRoute();
   const isAdmin = route === '#admin';
@@ -2057,6 +2167,9 @@ export default function App() {
         break;
       case '#/transports':
         routeBody = <TransportsView merged={merged} />;
+        break;
+      case '#/grooming':
+        routeBody = <GroomingView merged={merged} />;
         break;
       case '#/dashboard':
       default:
