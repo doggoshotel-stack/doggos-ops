@@ -1368,7 +1368,9 @@ function ClientsView({ hubspot, merged, pending }) {
       const key = h.id || `anon-${anonymous++}`;
       const existing = map.get(key);
       if (!existing || (h.submittedAt?.getTime() || 0) > (existing.submittedAt?.getTime() || 0)) {
-        map.set(key, h);
+        // Stamp the dedup key onto the record so React rows always have a unique
+        // key, even when the HubSpot export omits Conversion ID / Contact ID.
+        map.set(key, h.id ? h : { ...h, id: key });
       }
     }
     return Array.from(map.values()).sort((a, b) => (b.submittedAt?.getTime() || 0) - (a.submittedAt?.getTime() || 0));
