@@ -55,6 +55,7 @@ function doPost(e) {
     if (action === 'requestLink') return handleRequestLink_(body);
     if (action === 'getRecord')  return handleGetRecord_(body);
     if (action === 'saveRecord') return handleSaveRecord_(body);
+    if (action === 'savePhoto')  return handleSavePhoto_(body);
     return jsonOut_({ error: 'Unknown action' });
   } catch (err) {
     return jsonOut_({ error: String(err && err.message || err) });
@@ -103,7 +104,59 @@ function handleGetRecord_(body) {
   var payload = verify_(body.token);
   if (!payload) return jsonOut_({ error: 'invalid_token' });
   var rows = findRowsByEmail_(payload.email);
-  return jsonOut_({ ok: true, email: payload.email, records: rows.map(function (r) { return r.fields; }) });
+  var ids = rows.map(function (r) { return r.id; }).filter(function (id) { return id; });
+  var photos = getPhotosForIds_(ids);
+  return jsonOut_({
+    ok: true,
+    email: payload.email,
+    records: rows.map(function (r) { return r.fields; }),
+    photos: photos,
+  });
+}
+
+// { action:'savePhoto', token, id, photo }
+// photo is a data URL (e.g. "data:image/jpeg;base64,...") or '' to remove it.
+// The dashboard reads the same dog_extras tab, so we stay byte-compatible.
+function handleSavePhoto_(body) {
+  var payload = verify_(body.token);
+  if (!payload) return jsonOut_({ error: 'invalid_token' });
+
+  var targetId = String(body.id || '').trim();
+  if (!targetId) return jsonOut_({ error: 'missing_id' });
+
+  // Authorize: the id must belong to one of THIS customer's rows.
+  var rows = findRowsByEmail_(payload.email);
+  var owns = rows.some(function (r) { return String(r.id) === targetId; });
+  if (!owns) return jsonOut_({ error: 'not_your_dog' });
+
+  var photo = String(body.photo == null ? '' : body.photo);
+  if (photo && photo.indexOf('data:image/') !== 0) return jsonOut_({ error: 'invalid_photo' });
+  if (photo.length > 50000) return jsonOut_({ error: 'photo_too_large' });
+
+  var sheet = getExtrasSheet_(true);
+  var values = sheet.getDataRange().getValues();
+  var headers = values[0] || [];
+  var idCol = headers.indexOf('dog_id');
+  var photoCol = headers.indexOf('photo');
+  var updCol = headers.indexOf('updated_at');
+  if (idCol < 0 || photoCol < 0) return jsonOut_({ error: 'extras_sheet_malformed' });
+
+  var now = new Date().toISOString();
+  for (var r = 1; r < values.length; r++) {
+    if (String(values[r][idCol]) === targetId) {
+      sheet.getRange(r + 1, photoCol + 1).setValue(photo);
+      if (updCol >= 0) sheet.getRange(r + 1, updCol + 1).setValue(now);
+      return jsonOut_({ ok: true, id: targetId });
+    }
+  }
+
+  // No existing extras row → append one.
+  var newRow = new Array(headers.length).fill('');
+  newRow[idCol] = targetId;
+  newRow[photoCol] = photo;
+  if (updCol >= 0) newRow[updCol] = now;
+  sheet.appendRow(newRow);
+  return jsonOut_({ ok: true, id: targetId, created: true });
 }
 
 // { action:'saveRecord', token, id, fields:{ <header>: value } }
@@ -183,6 +236,47 @@ function findRowsByEmail_(email) {
       id: idCol >= 0 ? String(values[r][idCol] || '') : '',
       fields: fields,
     });
+  }
+  return out;
+}
+
+/* ----------------------------- dog_extras helpers ----------------------------- */
+
+function extrasSheetName_() {
+  return PROPS.getProperty('EXTRAS_SHEET') || 'dog_extras';
+}
+
+// Opens the dog_extras tab in the same spreadsheet (SHEET_ID). Creates it with
+// headers only if missing AND createIfMissing is true. Returns null otherwise.
+function getExtrasSheet_(createIfMissing) {
+  var ss = SpreadsheetApp.openById(PROPS.getProperty('SHEET_ID'));
+  var name = extrasSheetName_();
+  var sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    if (!createIfMissing) return null;
+    sheet = ss.insertSheet(name);
+    sheet.getRange(1, 1, 1, 4).setValues([['dog_id', 'comments', 'photo', 'updated_at']]);
+  }
+  return sheet;
+}
+
+// Returns { dog_id: photoDataUrl } for the given ids (skips empties).
+function getPhotosForIds_(ids) {
+  var out = {};
+  if (!ids || !ids.length) return out;
+  var sheet = getExtrasSheet_(false);
+  if (!sheet) return out;
+  var values = sheet.getDataRange().getValues();
+  if (values.length < 2) return out;
+  var headers = values[0];
+  var idCol = headers.indexOf('dog_id');
+  var photoCol = headers.indexOf('photo');
+  if (idCol < 0 || photoCol < 0) return out;
+  var want = {};
+  for (var i = 0; i < ids.length; i++) want[String(ids[i])] = true;
+  for (var r = 1; r < values.length; r++) {
+    var id = String(values[r][idCol]);
+    if (want[id] && values[r][photoCol]) out[id] = String(values[r][photoCol]);
   }
   return out;
 }
