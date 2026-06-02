@@ -135,6 +135,9 @@ export default function MonthlyView({ reservations = [], capacity = 42, now = ne
           .mv-cell-weekday-inline { display: inline; opacity: 0.6; font-size: 10px; font-weight: 700; letter-spacing: 0.12em; margin-right: 8px; text-transform: uppercase; }
           .mv-cell-pct { font-size: 13px !important; margin-right: 4px; }
           .mv-pad { display: none; }
+          .mv-modal-overlay { padding: 0 !important; align-items: flex-end !important; }
+          .mv-modal-card { padding: 20px 16px calc(20px + env(safe-area-inset-bottom)) !important; max-height: 92vh !important; border-radius: 18px 18px 0 0 !important; }
+          .mv-modal-title { font-size: 32px !important; }
         }
       `}</style>
       {/* Header */}
@@ -360,6 +363,7 @@ function DayDetailModal({ day, reservations, onClose }) {
   return (
     <div
       onClick={onClose}
+      className="mv-modal-overlay"
       style={{
         position: 'fixed', inset: 0,
         background: 'rgba(33,57,44,0.55)',
@@ -370,7 +374,7 @@ function DayDetailModal({ day, reservations, onClose }) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="tile"
+        className="tile mv-modal-card"
         style={{
           maxWidth: 720, width: '100%',
           maxHeight: '85vh', overflow: 'auto',
@@ -380,7 +384,7 @@ function DayDetailModal({ day, reservations, onClose }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, gap: 16 }}>
           <div>
             <div className="eyebrow eyebrow-sm" style={{ opacity: 0.65 }}>{dateLabel.toUpperCase()}</div>
-            <h2 className="display" style={{ fontSize: 40, lineHeight: 1, marginTop: 6 }}>
+            <h2 className="display mv-modal-title" style={{ fontSize: 40, lineHeight: 1, marginTop: 6 }}>
               {arrivals.length + departures.length} {arrivals.length + departures.length === 1 ? 'movimiento' : 'movimientos'}
             </h2>
             <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6, marginTop: 6 }}>
