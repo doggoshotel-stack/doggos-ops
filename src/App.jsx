@@ -1714,23 +1714,6 @@ function ClientDetailPanel({ h }) {
         </div>
       )}
 
-      <div>
-        <SectionHeader>Comentarios del equipo</SectionHeader>
-        <textarea
-          value={extras.comments}
-          onChange={(e) => update({ comments: e.target.value })}
-          placeholder="Notas internas sobre este perro (comportamiento, preferencias, recordatorios)…"
-          rows={3}
-          style={{
-            width: '100%', resize: 'vertical', padding: '10px 12px',
-            border: '1px solid rgba(33, 57, 44, 0.2)', borderRadius: 8,
-            fontSize: 13.5, lineHeight: 1.45, fontFamily: 'inherit', color: C.ink,
-            background: C.cream, boxSizing: 'border-box',
-          }}
-        />
-        <div style={{ fontSize: 11, opacity: 0.5, marginTop: 3 }}>Se guarda automáticamente en este dispositivo.</div>
-      </div>
-
       <Section title="Veterinario y emergencias" rows={vet} />
 
       <div>
@@ -1749,6 +1732,23 @@ function ClientDetailPanel({ h }) {
             </span>
           ))}
         </div>
+      </div>
+
+      <div>
+        <SectionHeader>Comentarios del equipo</SectionHeader>
+        <textarea
+          value={extras.comments}
+          onChange={(e) => update({ comments: e.target.value })}
+          placeholder="Notas internas sobre este perro (comportamiento, preferencias, recordatorios)…"
+          rows={3}
+          style={{
+            width: '100%', resize: 'vertical', padding: '10px 12px',
+            border: '1px solid rgba(33, 57, 44, 0.2)', borderRadius: 8,
+            fontSize: 13.5, lineHeight: 1.45, fontFamily: 'inherit', color: C.ink,
+            background: C.cream, boxSizing: 'border-box',
+          }}
+        />
+        <div style={{ fontSize: 11, opacity: 0.5, marginTop: 3 }}>Se guarda automáticamente en este dispositivo.</div>
       </div>
 
       {(h.id || h.submittedAt) && (
