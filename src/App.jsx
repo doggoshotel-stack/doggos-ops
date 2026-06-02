@@ -1928,7 +1928,7 @@ function TransportJobRow({ job }) {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {kind === 'tardia' && <span className="pastilla outline-celeste">Late Checkout</span>}
+          {kind === 'tardia' && <span className="pastilla" style={{ background: C.brick, color: C.cream }}>Late Checkout</span>}
           {showTime && (
             <span className="display tabular" style={{ fontSize: 22, color: C.ink }}>{timeStr}</span>
           )}
