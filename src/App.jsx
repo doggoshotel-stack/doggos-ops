@@ -1927,9 +1927,12 @@ function TransportJobRow({ job }) {
             <span style={{ marginLeft: 8, fontSize: 13, opacity: 0.7 }}>· {r.guest || '—'}</span>
           </div>
         </div>
-        {showTime && (
-          <span className="display tabular" style={{ fontSize: 22, color: C.ink }}>{timeStr}</span>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {kind === 'tardia' && <span className="pastilla outline-celeste">Late Checkout</span>}
+          {showTime && (
+            <span className="display tabular" style={{ fontSize: 22, color: C.ink }}>{timeStr}</span>
+          )}
+        </div>
       </div>
       {isTransport ? (
         <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.5 }}>
@@ -1947,8 +1950,8 @@ function TransportJobRow({ job }) {
           </div>
         </div>
       ) : (
-        <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.5, opacity: 0.7 }}>
-          Salida más tarde de lo habitual — coordinar entrega/recogida.
+        <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.5 }}>
+          <span style={{ opacity: 0.6, fontWeight: 700 }}>Late Checkout:</span> Salida más tarde de lo habitual — coordinar entrega.
         </div>
       )}
     </div>
