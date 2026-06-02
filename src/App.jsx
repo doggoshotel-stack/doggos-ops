@@ -2871,6 +2871,7 @@ function OccupancyCells({ inHouse, capacity }) {
 }
 
 function OccupancyForecast({ merged, capacity, now }) {
+  const isMobile = useIsMobile();
   const days = useMemo(() => {
     const start = new Date(now); start.setHours(0, 0, 0, 0);
     const out = [];
@@ -2922,8 +2923,8 @@ function OccupancyForecast({ merged, capacity, now }) {
   const todayK = todayKey();
 
   return (
-    <section style={{ margin: '14px 32px 0', padding: '14px 18px 16px', borderRadius: 16, border: `1.5px solid ${C.ink}`, background: C.cream }}>
-      <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+    <section style={{ margin: isMobile ? '14px 16px 0' : '14px 32px 0', padding: '14px 18px 16px', borderRadius: 16, border: `1.5px solid ${C.ink}`, background: C.cream }}>
+      <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span className="eyebrow eyebrow-sm" style={{ opacity: 0.6 }}>Ocupación · próximos 7 días</span>
           <h3 className="display" style={{ fontSize: 22, lineHeight: 1 }}>Previsión semanal</h3>
