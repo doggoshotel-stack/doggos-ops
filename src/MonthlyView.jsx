@@ -121,20 +121,25 @@ export default function MonthlyView({ reservations = [], capacity = 42, now = ne
         .mv-cell-weekday-inline { display: none; }
         .mv-cell-bottom { margin-top: auto; }
         @media (max-width: 760px) {
-          .mv-page { padding: 20px 16px 60px !important; }
+          .mv-page { padding: 20px 12px 60px !important; }
           .mv-header-title { font-size: 38px !important; }
           .mv-header-nav { width: 100%; justify-content: space-between; }
           .mv-kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
           .mv-kpi-value { font-size: 32px !important; }
-          .mv-weekday-row { display: none; }
-          .mv-calendar-grid { grid-template-columns: 1fr; gap: 6px; }
-          .mv-cell { flex-direction: row !important; align-items: center; min-height: 52px !important; padding: 10px 14px !important; gap: 12px; }
-          .mv-cell-top { flex: 1; align-items: center !important; }
-          .mv-cell-day { font-size: 16px !important; }
-          .mv-cell-bottom { margin-top: 0 !important; }
-          .mv-cell-weekday-inline { display: inline; opacity: 0.6; font-size: 10px; font-weight: 700; letter-spacing: 0.12em; margin-right: 8px; text-transform: uppercase; }
-          .mv-cell-pct { font-size: 13px !important; margin-right: 4px; }
-          .mv-pad { display: none; }
+          /* Keep a real 7-column calendar grid on phone, just compact */
+          .mv-cal-tile { padding: 10px 8px !important; }
+          .mv-weekday-row { gap: 3px !important; margin-bottom: 6px; }
+          .mv-weekday-row > div { font-size: 9px !important; padding: 0 !important; }
+          .mv-calendar-grid { grid-template-columns: repeat(7, 1fr) !important; gap: 3px !important; }
+          .mv-cell { min-height: 54px !important; padding: 4px 2px !important; }
+          .mv-cell-top { justify-content: center !important; }
+          .mv-cell-day { font-size: 13px !important; }
+          .mv-cell-pct { display: none !important; }
+          .mv-cell-bottom { justify-content: center !important; gap: 2px !important; margin-top: 3px !important; }
+          .mv-badge-occ { font-size: 10px !important; padding: 1px 4px !important; gap: 0 !important; }
+          .mv-badge-occ svg { display: none !important; }
+          .mv-badge-arr, .mv-badge-dep { width: 6px; height: 6px; padding: 0 !important; font-size: 0 !important; line-height: 0; overflow: hidden; }
+          .mv-pad { min-height: 54px !important; }
           .mv-modal-overlay { padding: 0 !important; align-items: flex-end !important; }
           .mv-modal-card { padding: 20px 16px calc(20px + env(safe-area-inset-bottom)) !important; max-height: 92vh !important; border-radius: 18px 18px 0 0 !important; }
           .mv-modal-title { font-size: 32px !important; }
@@ -211,7 +216,7 @@ export default function MonthlyView({ reservations = [], capacity = 42, now = ne
       </div>
 
       {/* Calendar */}
-      <div className="tile" style={{ padding: 20 }}>
+      <div className="tile mv-cal-tile" style={{ padding: 20 }}>
         {/* Weekday headers (desktop only) */}
         <div className="mv-weekday-row">
           {WEEKDAYS_ES.map((w) => (
@@ -265,6 +270,7 @@ export default function MonthlyView({ reservations = [], capacity = 42, now = ne
                 <div className="mv-cell-bottom" style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                   {d.occupancy > 0 && (
                     <span
+                      className="mv-badge-occ"
                       title={`${d.occupancy} perro${d.occupancy === 1 ? '' : 's'} en casa`}
                       style={{ background: C.ink, color: C.amarillo, fontSize: 13, fontWeight: 700, padding: '3px 10px', borderRadius: 999, letterSpacing: '0.04em', display: 'inline-flex', alignItems: 'center', gap: 5 }}
                     >
@@ -275,12 +281,12 @@ export default function MonthlyView({ reservations = [], capacity = 42, now = ne
                     </span>
                   )}
                   {d.arrivals > 0 && (
-                    <span style={{ background: C.amarillo, color: C.ink, fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 999, letterSpacing: '0.04em' }}>
+                    <span className="mv-badge-arr" style={{ background: C.amarillo, color: C.ink, fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 999, letterSpacing: '0.04em' }}>
                       ↓{d.arrivals}
                     </span>
                   )}
                   {d.departures > 0 && (
-                    <span style={{ background: C.celeste, color: C.ink, fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 999, letterSpacing: '0.04em' }}>
+                    <span className="mv-badge-dep" style={{ background: C.celeste, color: C.ink, fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 999, letterSpacing: '0.04em' }}>
                       ↑{d.departures}
                     </span>
                   )}
