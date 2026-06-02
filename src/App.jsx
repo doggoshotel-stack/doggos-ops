@@ -1764,7 +1764,10 @@ function ClientDetailPanel({ h }) {
 
 function SectionHeader({ children }) {
   return (
-    <div className="eyebrow eyebrow-sm" style={{ opacity: 0.55, marginBottom: 6 }}>{children}</div>
+    <div className="eyebrow" style={{
+      color: C.ink, marginBottom: 8, paddingBottom: 5,
+      borderBottom: '1.5px solid rgba(33, 57, 44, 0.18)',
+    }}>{children}</div>
   );
 }
 
