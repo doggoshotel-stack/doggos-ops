@@ -473,7 +473,8 @@ const ALERT_STYLES = {
   behavior:  { label: 'Manejo',          pastilla: 'pastilla ocre',    tint: '',              priority: 4 },
   diet:      { label: 'Dieta',           pastilla: 'pastilla celeste', tint: 'celeste-tint',  priority: 5 },
   transport: { label: 'Transporte',      pastilla: 'pastilla celeste', tint: '',              priority: 6 },
-  vip:       { label: 'VIP',             pastilla: 'pastilla lila',    tint: '',              priority: 7 },
+  lateCheckout: { label: 'Salida tardía', pastilla: 'pastilla outline-celeste', tint: '',     priority: 7 },
+  vip:       { label: 'VIP',             pastilla: 'pastilla lila',    tint: '',              priority: 8 },
 };
 
 function detectAlerts(record) {
@@ -513,6 +514,11 @@ function detectAlerts(record) {
   if (/transporte\s*vuelta/i.test(products)) transportLegs.push('Vuelta');
   if (transportLegs.length > 0) {
     alerts.push({ type: 'transport', detail: transportLegs.join(' + ') });
+  }
+
+  // Late checkout — Mews product line "Salida tardía de tu perro"
+  if (/salida\s*tard/i.test(products)) {
+    alerts.push({ type: 'lateCheckout', detail: 'Salida tardía contratada' });
   }
 
   // Behavior (keyword scan — no structured field)
@@ -1833,11 +1839,15 @@ function TransportsView({ merged }) {
       const products = String(r.products || '');
       const hasIda = /transporte\s*ida/i.test(products);
       const hasVuelta = /transporte\s*vuelta/i.test(products);
+      const hasTardia = /salida\s*tard/i.test(products);
       if (hasIda && r.arrival && r.arrival >= today && r.arrival <= limit) {
         out.push({ kind: 'ida', time: r.arrival, r });
       }
       if (hasVuelta && r.departure && r.departure >= today && r.departure <= limit) {
         out.push({ kind: 'vuelta', time: r.departure, r });
+      }
+      if (hasTardia && r.departure && r.departure >= today && r.departure <= limit) {
+        out.push({ kind: 'tardia', time: r.departure, r });
       }
     });
     out.sort((a, b) => a.time.getTime() - b.time.getTime());
@@ -1886,11 +1896,17 @@ function TransportDayBlock({ dKey, jobs }) {
   );
 }
 
+const TRANSPORT_KIND = {
+  ida:    { label: 'Pickup · Ida',    accent: C.celeste, eyebrow: C.ocre },
+  vuelta: { label: 'Dropoff · Vuelta', accent: C.lila,    eyebrow: C.lila },
+  tardia: { label: 'Salida tardía',    accent: C.ocre,    eyebrow: C.ocre },
+};
+
 function TransportJobRow({ job }) {
   const { kind, time, r } = job;
   const isIda = kind === 'ida';
-  const directionLabel = isIda ? 'Pickup · Ida' : 'Dropoff · Vuelta';
-  const accent = isIda ? C.celeste : C.lila;
+  const isTransport = kind === 'ida' || kind === 'vuelta';
+  const def = TRANSPORT_KIND[kind];
   const timeStr = `${pad2(time.getHours())}:${pad2(time.getMinutes())}`;
   const showTime = !(time.getHours() === 0 && time.getMinutes() === 0);
   const noAddress = !r.address;
@@ -1900,12 +1916,12 @@ function TransportJobRow({ job }) {
       padding: 14, marginBottom: 8,
       background: C.cream,
       border: `1px solid rgba(33, 57, 44, 0.12)`,
-      borderLeft: `4px solid ${accent}`,
+      borderLeft: `4px solid ${def.accent}`,
       borderRadius: 8,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
         <div>
-          <span className="eyebrow eyebrow-sm" style={{ color: accent === C.celeste ? C.ocre : C.lila, fontWeight: 700 }}>{directionLabel}</span>
+          <span className="eyebrow eyebrow-sm" style={{ color: def.eyebrow, fontWeight: 700 }}>{def.label}</span>
           <div style={{ marginTop: 3 }}>
             <span className="display" style={{ fontSize: 20, lineHeight: 1 }}>{r.pet || '—'}</span>
             <span style={{ marginLeft: 8, fontSize: 13, opacity: 0.7 }}>· {r.guest || '—'}</span>
@@ -1915,20 +1931,26 @@ function TransportJobRow({ job }) {
           <span className="display tabular" style={{ fontSize: 22, color: C.ink }}>{timeStr}</span>
         )}
       </div>
-      <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.5 }}>
-        <div>
-          <span style={{ opacity: 0.6 }}>Tel:</span>{' '}
-          {noPhone
-            ? <span style={{ color: C.brick }}>Sin teléfono — pedir al cliente</span>
-            : <strong>{r.phone}</strong>}
+      {isTransport ? (
+        <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.5 }}>
+          <div>
+            <span style={{ opacity: 0.6 }}>Tel:</span>{' '}
+            {noPhone
+              ? <span style={{ color: C.brick }}>Sin teléfono — pedir al cliente</span>
+              : <strong>{r.phone}</strong>}
+          </div>
+          <div>
+            <span style={{ opacity: 0.6 }}>{isIda ? 'Recogida en:' : 'Entrega en:'}</span>{' '}
+            {noAddress
+              ? <span style={{ color: C.brick }}>Sin dirección — falta ficha HubSpot o columna Dirección vacía</span>
+              : <strong>{r.address}</strong>}
+          </div>
         </div>
-        <div>
-          <span style={{ opacity: 0.6 }}>{isIda ? 'Recogida en:' : 'Entrega en:'}</span>{' '}
-          {noAddress
-            ? <span style={{ color: C.brick }}>Sin dirección — falta ficha HubSpot o columna Dirección vacía</span>
-            : <strong>{r.address}</strong>}
+      ) : (
+        <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.5, opacity: 0.7 }}>
+          Salida más tarde de lo habitual — coordinar entrega/recogida.
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -2484,9 +2506,10 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
     const out = [];
     allActive.forEach((r) => {
       const flags = detectAlerts(r);
-      flags.forEach((f) => out.push({ res: r, ...f }));
+      if (flags.length > 0) out.push({ res: r, flags });
     });
-    out.sort((a, b) => ALERT_STYLES[a.type].priority - ALERT_STYLES[b.type].priority);
+    // order dogs by their highest-priority alert (flags already sorted within detectAlerts)
+    out.sort((a, b) => ALERT_STYLES[a.flags[0].type].priority - ALERT_STYLES[b.flags[0].type].priority);
     return out;
   }, [allActive]);
 
@@ -2631,7 +2654,7 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
         <Column title="Alertas activas" eyebrow="Atención" count={alertsList.length}>
           {alertsList.length === 0
             ? <Empty>Sin alertas operativas</Empty>
-            : alertsList.map((a, i) => <AlertRow key={`${a.res.id}-${a.type}-${i}`} res={a.res} type={a.type} detail={a.detail} />)}
+            : alertsList.map((a) => <AlertRow key={a.res.id} res={a.res} flags={a.flags} />)}
         </Column>
       </main>
 
@@ -3058,20 +3081,30 @@ function GuestRow({ r, time, variant }) {
   );
 }
 
-function AlertRow({ res, type, detail }) {
-  const def = ALERT_STYLES[type];
+function AlertRow({ res, flags }) {
+  const tint = ALERT_STYLES[flags[0]?.type]?.tint || '';
   return (
-    <div className={`row fade-in ${def.tint}`}>
+    <div className={`row fade-in ${tint}`}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
         <span className="display" style={{ fontSize: 22, lineHeight: 1 }}>{res.pet || res.guest}</span>
-        <span className={def.pastilla}>{def.label}</span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end' }}>
+          {flags.map((f) => (
+            <span key={f.type} className={ALERT_STYLES[f.type].pastilla}>{ALERT_STYLES[f.type].label}</span>
+          ))}
+        </div>
       </div>
       {res.pet && res.guest && (
         <span className="eyebrow eyebrow-sm" style={{ opacity: 0.55, marginTop: 2 }}>
           {res.guest} · {res.spaceType || res.service}
         </span>
       )}
-      <p style={{ fontSize: 13, lineHeight: 1.45, marginTop: 6 }}>{detail}</p>
+      <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {flags.map((f) => (
+          <p key={f.type} style={{ fontSize: 13, lineHeight: 1.4, margin: 0 }}>
+            <span style={{ opacity: 0.5, fontWeight: 700 }}>{ALERT_STYLES[f.type].label}:</span> {f.detail}
+          </p>
+        ))}
+      </div>
     </div>
   );
 }
