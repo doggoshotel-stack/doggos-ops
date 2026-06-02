@@ -829,6 +829,20 @@ function useRoute() {
   return route;
 }
 
+const MOBILE_BREAKPOINT = 720;
+
+function useIsMobile(breakpoint = MOBILE_BREAKPOINT) {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth < breakpoint : false);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < breakpoint);
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [breakpoint]);
+  return isMobile;
+}
+
 function getInitialSidebarCollapsed() {
   if (typeof window === 'undefined') return false;
   try {
@@ -1072,10 +1086,121 @@ function Sidebar({ route, collapsed, onToggle, isManagement, onLogout }) {
   );
 }
 
-function PageHeader({ title, subtitle }) {
+const MOBILE_TOPBAR_H = 56;
+
+function MobileTopBar({ onMenu, isManagement }) {
   return (
-    <header style={{ padding: '32px 32px 16px' }}>
-      <h1 className="display" style={{ fontSize: 36, color: C.ink, margin: 0, lineHeight: 1 }}>{title}</h1>
+    <header style={{
+      position: 'fixed', top: 0, left: 0, right: 0, height: MOBILE_TOPBAR_H,
+      background: C.ink, color: C.cream, zIndex: 60,
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '0 8px 0 16px',
+    }}>
+      <span style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <span className="display" style={{ fontSize: 24, color: C.cream, lineHeight: 1 }}>doggos</span>
+        {isManagement && (
+          <span className="eyebrow" style={{ background: C.amarillo, color: C.ink, fontSize: 9, padding: '2px 6px', borderRadius: 4, letterSpacing: '0.2em' }}>MGMT</span>
+        )}
+      </span>
+      <button onClick={onMenu} aria-label="Abrir menú" style={{
+        background: 'transparent', border: 'none', color: C.cream, cursor: 'pointer',
+        padding: 10, display: 'flex', alignItems: 'center',
+      }}>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 6h18M3 12h18M3 18h18" /></svg>
+      </button>
+    </header>
+  );
+}
+
+function MobileDrawer({ open, onClose, route, isManagement, onLogout }) {
+  const go = (hash) => { navigate(hash); onClose(); };
+  const itemStyle = (active) => ({
+    display: 'flex', alignItems: 'center', gap: 14, padding: '14px 14px',
+    background: active ? C.amarillo : 'transparent', color: active ? C.ink : C.cream,
+    border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 16, fontWeight: 500,
+    fontFamily: 'inherit', textAlign: 'left', width: '100%',
+  });
+  return (
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(33, 57, 44, 0.5)', zIndex: 70,
+        opacity: open ? 1 : 0, pointerEvents: open ? 'auto' : 'none', transition: 'opacity 200ms ease',
+      }} />
+      <aside style={{
+        position: 'fixed', top: 0, bottom: 0, left: 0, width: '80%', maxWidth: 300,
+        background: C.ink, color: C.cream, zIndex: 71,
+        transform: open ? 'translateX(0)' : 'translateX(-100%)',
+        transition: 'transform 240ms cubic-bezier(0.22, 1, 0.36, 1)',
+        display: 'flex', flexDirection: 'column', overflow: 'auto',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', borderBottom: '1px solid rgba(234, 232, 221, 0.15)' }}>
+          <span className="display" style={{ fontSize: 26, color: C.cream, lineHeight: 1 }}>doggos</span>
+          <button onClick={onClose} aria-label="Cerrar menú" style={{ background: 'transparent', border: 'none', color: C.cream, cursor: 'pointer', padding: 6, display: 'flex' }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+        <nav style={{ display: 'flex', flexDirection: 'column', padding: '12px 10px', gap: 4, flex: 1 }}>
+          {NAV_ITEMS.map((item) => (
+            <button key={item.hash} onClick={() => go(item.hash)} style={itemStyle(route === item.hash)}>
+              <span style={{ display: 'flex', flex: 'none' }}>{item.icon}</span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+
+          {!isManagement && (
+            <button onClick={() => go('#/management')} style={{
+              ...itemStyle(false), opacity: 0.7,
+              border: '1px dashed rgba(234, 232, 221, 0.25)', marginTop: 8, fontSize: 14,
+            }}>
+              <span style={{ display: 'flex', flex: 'none' }}>
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round">
+                  <rect x="4" y="9" width="12" height="8" rx="1" /><path d="M7 9 V6 C7 4.5 8 3 10 3 C12 3 13 4.5 13 6 V9" />
+                </svg>
+              </span>
+              <span>Management</span>
+            </button>
+          )}
+
+          {isManagement && (
+            <>
+              <div className="eyebrow eyebrow-sm" style={{ color: C.amarillo, opacity: 0.85, marginTop: 16, padding: '6px 12px', fontSize: 9, letterSpacing: '0.2em' }}>MANAGEMENT</div>
+              {MGMT_NAV.map((item) => {
+                const active = route === item.hash || (item.hash === '#/management' && route.startsWith('#/management') && !MGMT_NAV.slice(1).some((o) => route === o.hash));
+                return (
+                  <button key={item.hash} onClick={() => go(item.hash)} style={itemStyle(active)}>
+                    <span style={{ width: 6, height: 6, background: active ? C.ink : C.amarillo, borderRadius: 999, flex: 'none' }} />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </>
+          )}
+        </nav>
+
+        {isManagement && (
+          <div style={{ padding: '12px 10px', borderTop: '1px solid rgba(234, 232, 221, 0.15)' }}>
+            <button onClick={() => { onLogout(); onClose(); }} style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px',
+              background: 'transparent', color: C.cream, opacity: 0.8,
+              border: '1px solid rgba(234, 232, 221, 0.25)', borderRadius: 10,
+              cursor: 'pointer', fontSize: 12, fontWeight: 700, letterSpacing: '0.12em',
+              textTransform: 'uppercase', fontFamily: 'inherit', width: '100%',
+            }}>
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 4 L4 4 L4 16 L12 16" /><path d="M9 10 L17 10 M14 7 L17 10 L14 13" /></svg>
+              <span>Salir</span>
+            </button>
+          </div>
+        )}
+      </aside>
+    </>
+  );
+}
+
+function PageHeader({ title, subtitle }) {
+  const isMobile = useIsMobile();
+  return (
+    <header style={{ padding: isMobile ? '20px 16px 12px' : '32px 32px 16px' }}>
+      <h1 className="display" style={{ fontSize: isMobile ? 28 : 36, color: C.ink, margin: 0, lineHeight: 1 }}>{title}</h1>
       {subtitle && (
         <div className="eyebrow eyebrow-sm" style={{ color: C.ink, opacity: 0.6, marginTop: 6 }}>{subtitle}</div>
       )}
@@ -1329,10 +1454,11 @@ function ReservationDetailCard({ r }) {
 }
 
 function CardList({ items, emptyText }) {
+  const isMobile = useIsMobile();
   if (items.length === 0) {
     return (
       <div style={{
-        margin: '0 32px', padding: 28,
+        margin: isMobile ? '0 16px' : '0 32px', padding: 28,
         background: 'rgba(33, 57, 44, 0.04)',
         borderRadius: 12, color: C.ink, opacity: 0.65,
         fontSize: 14, textAlign: 'center',
@@ -1342,7 +1468,7 @@ function CardList({ items, emptyText }) {
     );
   }
   return (
-    <div style={{ padding: '0 32px 60px' }}>
+    <div style={{ padding: isMobile ? '0 16px 60px' : '0 32px 60px' }}>
       {items.map((r) => <ReservationDetailCard key={r.id} r={r} />)}
     </div>
   );
@@ -1396,6 +1522,7 @@ function InHouseView({ merged }) {
 }
 
 function ClientsView({ hubspot, merged, pending, dogExtras, onSaveExtra }) {
+  const isMobile = useIsMobile();
   const [query, setQuery] = useState('');
   const unique = useMemo(() => {
     // Primary source: every parsed HubSpot row, regardless of arrival date.
@@ -1430,7 +1557,7 @@ function ClientsView({ hubspot, merged, pending, dogExtras, onSaveExtra }) {
   return (
     <div>
       <PageHeader title="Clientes" subtitle={`${unique.length} ${unique.length === 1 ? 'ficha HubSpot' : 'fichas HubSpot'}`} />
-      <div style={{ padding: '0 32px 16px' }}>
+      <div style={{ padding: isMobile ? '0 16px 16px' : '0 32px 16px' }}>
         <input
           type="text"
           value={query}
@@ -1449,7 +1576,7 @@ function ClientsView({ hubspot, merged, pending, dogExtras, onSaveExtra }) {
           </div>
         )}
       </div>
-      <div style={{ padding: '0 32px 60px' }}>
+      <div style={{ padding: isMobile ? '0 16px 60px' : '0 32px 60px' }}>
         {filtered.length === 0 ? (
           <div style={{ padding: 28, background: 'rgba(33, 57, 44, 0.04)', borderRadius: 12, color: C.ink, opacity: 0.6, fontSize: 14, textAlign: 'center' }}>
             {query ? 'Sin coincidencias.' : 'Sin fichas HubSpot.'}
@@ -1831,6 +1958,7 @@ function Section({ title, rows }) {
 }
 
 function TransportsView({ merged }) {
+  const isMobile = useIsMobile();
   const jobs = useMemo(() => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const limit = new Date(today); limit.setDate(limit.getDate() + 7); limit.setHours(23, 59, 59, 999);
@@ -1868,11 +1996,11 @@ function TransportsView({ merged }) {
     <div>
       <PageHeader title="Transportes" subtitle={`Próximos 7 días · ${jobs.length} ${jobs.length === 1 ? 'servicio' : 'servicios'}`} />
       {byDay.length === 0 ? (
-        <div style={{ margin: '0 32px 60px', padding: 28, background: 'rgba(33, 57, 44, 0.04)', borderRadius: 12, color: C.ink, opacity: 0.65, fontSize: 14, textAlign: 'center' }}>
+        <div style={{ margin: isMobile ? '0 16px 60px' : '0 32px 60px', padding: 28, background: 'rgba(33, 57, 44, 0.04)', borderRadius: 12, color: C.ink, opacity: 0.65, fontSize: 14, textAlign: 'center' }}>
           Sin transportes programados en los próximos 7 días.
         </div>
       ) : (
-        <div style={{ padding: '0 32px 60px' }}>
+        <div style={{ padding: isMobile ? '0 16px 60px' : '0 32px 60px' }}>
           {byDay.map(([dKey, dayJobs]) => <TransportDayBlock key={dKey} dKey={dKey} jobs={dayJobs} />)}
         </div>
       )}
@@ -1959,6 +2087,7 @@ function TransportJobRow({ job }) {
 }
 
 function GroomingView({ merged }) {
+  const isMobile = useIsMobile();
   const jobs = useMemo(() => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const limit = new Date(today); limit.setDate(limit.getDate() + 7); limit.setHours(23, 59, 59, 999);
@@ -1990,11 +2119,11 @@ function GroomingView({ merged }) {
     <div>
       <PageHeader title="Peluquería" subtitle={`Próximos 7 días · ${jobs.length} ${jobs.length === 1 ? 'servicio' : 'servicios'}`} />
       {byDay.length === 0 ? (
-        <div style={{ margin: '0 32px 60px', padding: 28, background: 'rgba(33, 57, 44, 0.04)', borderRadius: 12, color: C.ink, opacity: 0.65, fontSize: 14, textAlign: 'center' }}>
+        <div style={{ margin: isMobile ? '0 16px 60px' : '0 32px 60px', padding: 28, background: 'rgba(33, 57, 44, 0.04)', borderRadius: 12, color: C.ink, opacity: 0.65, fontSize: 14, textAlign: 'center' }}>
           Sin servicios de peluquería programados en los próximos 7 días.
         </div>
       ) : (
-        <div style={{ padding: '0 32px 60px' }}>
+        <div style={{ padding: isMobile ? '0 16px 60px' : '0 32px 60px' }}>
           {byDay.map(([dKey, dayJobs]) => <GroomingDayBlock key={dKey} dKey={dKey} jobs={dayJobs} />)}
         </div>
       )}
@@ -2068,6 +2197,9 @@ export default function App() {
   const [mgmtAuthed, setMgmtAuthed] = useState(() => checkMgmtAuth());
   useEffect(() => { setMgmtAuthed(checkMgmtAuth()); }, [route]);
   const [collapsed, setCollapsed] = useState(getInitialSidebarCollapsed);
+  const isMobile = useIsMobile();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  useEffect(() => { setDrawerOpen(false); }, [route]);
   const [config, setConfig] = useState(DEFAULT_CONFIG);
   const [meta, setMeta] = useState({ capacity: 42, lastUpdated: null });
   const [now, setNow] = useState(new Date());
@@ -2435,6 +2567,25 @@ export default function App() {
     navigate('#/dashboard');
   };
 
+  if (isMobile) {
+    return (
+      <div className="doggos-app" style={{ minHeight: '100vh', position: 'relative' }}>
+        <style>{STYLES}</style>
+        <MobileTopBar onMenu={() => setDrawerOpen(true)} isManagement={isMgmtRoute && mgmtAuthed} />
+        <MobileDrawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          route={route}
+          isManagement={isMgmtRoute && mgmtAuthed}
+          onLogout={handleLogout}
+        />
+        <div style={{ paddingTop: MOBILE_TOPBAR_H, minHeight: '100vh', position: 'relative' }}>
+          {routeBody}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="doggos-app" style={{ minHeight: '100vh', position: 'relative' }}>
       <style>{STYLES}</style>
@@ -2457,6 +2608,7 @@ export default function App() {
    ============================================================ */
 
 function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fetchErrors, isConfigured, onSwitchMode }) {
+  const isMobile = useIsMobile();
   const today = todayKey();
   const tomorrow = useMemo(() => {
     const d = new Date(); d.setDate(d.getDate() + 1);
@@ -2545,24 +2697,24 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
       <PeakTL height={60} />
       <PeakTR height={60} />
 
-      <header style={{ position: 'relative', zIndex: 5, padding: '24px 32px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 24 }}>
+      <header style={{ position: 'relative', zIndex: 5, padding: isMobile ? '16px 16px 0' : '24px 32px 0', display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'stretch' : 'flex-start', gap: isMobile ? 12 : 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <MountainMark size={32} color={C.ink} />
+          <MountainMark size={isMobile ? 26 : 32} color={C.ink} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <Wordmark size={32} />
+            <Wordmark size={isMobile ? 26 : 32} />
             <span className="eyebrow eyebrow-sm" style={{ opacity: 0.7 }}>Operaciones · Ullastrell</span>
           </div>
         </div>
 
-        <div style={{ textAlign: 'center', flex: 1 }}>
+        <div style={{ textAlign: isMobile ? 'left' : 'center', flex: 1 }}>
           <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
-            <span className="display tabular" style={{ fontSize: 56, color: C.ink }}>{timeLabel}</span>
-            <span className="display tabular" style={{ fontSize: 28, color: C.ink, opacity: 0.45 }}>:{secLabel}</span>
+            <span className="display tabular" style={{ fontSize: isMobile ? 40 : 56, color: C.ink }}>{timeLabel}</span>
+            <span className="display tabular" style={{ fontSize: isMobile ? 22 : 28, color: C.ink, opacity: 0.45 }}>:{secLabel}</span>
           </div>
           <div className="eyebrow" style={{ opacity: 0.55, marginTop: 2 }}>{cap(dateLabel)}</div>
         </div>
 
-        <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
+        <div style={{ textAlign: isMobile ? 'left' : 'right', display: 'flex', flexDirection: isMobile ? 'row' : 'column', justifyContent: isMobile ? 'space-between' : 'flex-start', gap: 6, alignItems: isMobile ? 'center' : 'flex-end' }}>
           <span className="eyebrow" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
             <span className="dot pulse" style={{ background: hasAnyError ? C.brick : (refreshing ? C.amarillo : C.ocre) }} />
             <span style={{ opacity: 0.7 }}>{hasAnyError ? 'error de origen' : lastUpdatedLabel}</span>
@@ -2579,8 +2731,8 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
       </header>
 
       {/* Hero KPI band */}
-      <section style={{ position: 'relative', margin: '20px 32px 0', borderRadius: 20, background: C.ink, color: C.cream, padding: '28px 32px 24px', overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 28, position: 'relative', zIndex: 2 }}>
+      <section style={{ position: 'relative', margin: isMobile ? '16px 16px 0' : '20px 32px 0', borderRadius: 20, background: C.ink, color: C.cream, padding: isMobile ? '20px 20px 18px' : '28px 32px 24px', overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)', gap: isMobile ? 18 : 28, position: 'relative', zIndex: 2 }}>
           <Stat label="En casa" value={`${inHouse.length}/${meta.capacity}`} sub={pct(occupancyPct)} />
           <Stat label="Llegadas hoy" value={String(arrivalsToday.length)} sub={arrivalsToday.length === 1 ? 'reserva' : 'reservas'} onClick={() => navigate('#/arrivals/today')} />
           <Stat label="Salidas hoy" value={String(departuresToday.length)} sub={departuresToday.length === 1 ? 'reserva' : 'reservas'} onClick={() => navigate('#/departures/today')} />
@@ -2597,7 +2749,7 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
       <CalendlyStrip events={upcomingEvents} todayCount={eventsTodayCount} />
 
       {/* Four columns */}
-      <main style={{ flex: 1, padding: '20px 32px 100px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, minHeight: 0 }}>
+      <main style={{ flex: 1, padding: isMobile ? '16px 16px 60px' : '20px 32px 100px', display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(4, 1fr)', gap: 16, minHeight: 0 }}>
         <TabbedColumn
           eyebrow="Check-in"
           tabs={[
