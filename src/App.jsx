@@ -561,6 +561,41 @@ async function fetchSheet(url, key) {
   return data;
 }
 
+// Per-dog editable extras (photo + comments) live in the `dog_extras` tab of
+// the HubSpot sheet, served by the same Apps Script bridge. Keyed by HubSpot id.
+async function fetchDogExtras(url, key) {
+  const rows = await fetchSheet(`${url}${url.includes('?') ? '&' : '?'}sheet=dog_extras`, key);
+  const map = {};
+  for (const row of rows) {
+    const id = row.dog_id != null ? String(row.dog_id).trim() : '';
+    if (!id) continue;
+    map[id] = {
+      comments: row.comments != null ? String(row.comments) : '',
+      photo: row.photo != null ? String(row.photo) : '',
+      updatedAt: row.updated_at || '',
+    };
+  }
+  return map;
+}
+
+// POST as text/plain so the browser skips the CORS preflight (Apps Script
+// can't answer one). We still try to read the JSON reply; if CORS blocks the
+// read it throws and the caller treats the write as fire-and-forget, with the
+// next refresh reconciling state.
+async function saveDogExtras(url, key, dogId, { comments, photo }) {
+  if (!url || !dogId) throw new Error('Falta URL o dog_id');
+  const res = await fetch(url, {
+    method: 'POST',
+    redirect: 'follow',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ key: key || '', dog_id: dogId, comments: comments || '', photo: photo || '' }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  if (data && data.error) throw new Error(`Apps Script: ${data.error}`);
+  return data;
+}
+
 /* ----------------------- demo data ----------------------- */
 
 const offsetDate = (days, hours = 12, minutes = 0) => {
@@ -684,11 +719,6 @@ const STORAGE_KEYS = {
   meta: 'doggos_meta',
   cache: 'doggos_cache',
 };
-
-// Per-dog editable extras (photo + free-text comments), keyed by HubSpot id.
-// Stored separately from the read-only HubSpot cache so a data refresh never
-// clobbers what the staff typed.
-const DOG_EXTRAS_PREFIX = 'doggos_dog_';
 
 const DEFAULT_CONFIG = {
   mewsUrl: '',
@@ -1359,7 +1389,7 @@ function InHouseView({ merged }) {
   );
 }
 
-function ClientsView({ hubspot, merged, pending }) {
+function ClientsView({ hubspot, merged, pending, dogExtras, onSaveExtra }) {
   const [query, setQuery] = useState('');
   const unique = useMemo(() => {
     // Primary source: every parsed HubSpot row, regardless of arrival date.
@@ -1419,14 +1449,14 @@ function ClientsView({ hubspot, merged, pending }) {
             {query ? 'Sin coincidencias.' : 'Sin fichas HubSpot.'}
           </div>
         ) : (
-          filtered.map((h) => <ClientRow key={h.id} h={h} />)
+          filtered.map((h) => <ClientRow key={h.id} h={h} extra={dogExtras?.[h.id]} onSaveExtra={onSaveExtra} />)
         )}
       </div>
     </div>
   );
 }
 
-function ClientRow({ h }) {
+function ClientRow({ h, extra, onSaveExtra }) {
   const [expanded, setExpanded] = useState(false);
   const meta = [h.breed, h.size, h.sex, h.age && `${h.age} años`, h.weight && `${h.weight} kg`].filter(Boolean).join(' · ');
   const contact = [h.email, h.phone, h.address].filter(Boolean).join(' · ');
@@ -1468,39 +1498,41 @@ function ClientRow({ h }) {
         {contact && <div style={{ marginTop: 3, marginLeft: 22, fontSize: 12, opacity: 0.65 }}>{contact}</div>}
       </button>
 
-      {expanded && <ClientDetailPanel h={h} />}
+      {expanded && <ClientDetailPanel h={h} extra={extra} onSaveExtra={onSaveExtra} />}
     </div>
   );
 }
 
-// Loads/saves a dog's photo + comments. Kept out of the HubSpot cache so a
-// data refresh never overwrites staff-entered notes.
-function useDogExtras(id) {
-  const [extras, setExtras] = useState({ photo: '', comments: '' });
-  const [loaded, setLoaded] = useState(false);
+// Editor state for a dog's photo + comments. Server state arrives via `extra`
+// (fetched from the dog_extras sheet); edits go back through `onSaveExtra`.
+// Comment writes are debounced; photo changes flush any pending comment in the
+// same write so the two fields can't race each other to the sheet.
+function useDogExtrasEditor(dogId, extra, onSaveExtra) {
+  const [comments, setComments] = useState(extra?.comments || '');
+  const photo = extra?.photo || '';
+  const dirty = useRef(false);
+  const timer = useRef(null);
 
+  // Adopt server comments on refresh only while the field is untouched.
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      if (!id) { setLoaded(true); return; }
-      try {
-        const rec = await storage.get(DOG_EXTRAS_PREFIX + id, true);
-        if (alive && rec?.value) setExtras({ photo: '', comments: '', ...JSON.parse(rec.value) });
-      } catch { /* corrupt entry — start fresh */ }
-      if (alive) setLoaded(true);
-    })();
-    return () => { alive = false; };
-  }, [id]);
+    if (!dirty.current) setComments(extra?.comments || '');
+  }, [extra?.comments]);
 
-  const update = useCallback((patch) => {
-    setExtras((prev) => {
-      const next = { ...prev, ...patch };
-      if (id) storage.set(DOG_EXTRAS_PREFIX + id, JSON.stringify(next), true);
-      return next;
-    });
-  }, [id]);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
-  return { extras, update, loaded };
+  const onCommentsChange = (val) => {
+    dirty.current = true;
+    setComments(val);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => onSaveExtra(dogId, { comments: val }), 800);
+  };
+
+  const setPhoto = (dataUrl) => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    onSaveExtra(dogId, { photo: dataUrl, comments });
+  };
+
+  return { comments, onCommentsChange, photo, setPhoto };
 }
 
 // Square avatar with click-to-upload. Downscales to 256px JPEG so a phone
@@ -1573,8 +1605,8 @@ function DogPhoto({ photo, name, onChange }) {
   );
 }
 
-function ClientDetailPanel({ h }) {
-  const { extras, update } = useDogExtras(h.id);
+function ClientDetailPanel({ h, extra, onSaveExtra }) {
+  const { comments, onCommentsChange, photo, setPhoto } = useDogExtrasEditor(h.id, extra, onSaveExtra);
   const yesNo = (v) => v === true ? 'Sí' : v === false ? 'No' : '—';
   const sterilizedText = yesNo(h.sterilized);
   const headline = [h.breed, h.size, h.sex, h.age && `${h.age} años`].filter(Boolean).join(' · ');
@@ -1624,7 +1656,7 @@ function ClientDetailPanel({ h }) {
       display: 'flex', flexDirection: 'column', gap: 14,
     }}>
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        <DogPhoto photo={extras.photo} name={h.pet} onChange={(photo) => update({ photo })} />
+        <DogPhoto photo={photo} name={h.pet} onChange={setPhoto} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="display" style={{ fontSize: 24, lineHeight: 1.05, color: C.ink }}>{h.pet || '—'}</div>
           {h.guest && <div style={{ fontSize: 13, opacity: 0.7, marginTop: 2 }}>{h.guest}</div>}
@@ -1737,8 +1769,8 @@ function ClientDetailPanel({ h }) {
       <div>
         <SectionHeader>Comentarios del equipo</SectionHeader>
         <textarea
-          value={extras.comments}
-          onChange={(e) => update({ comments: e.target.value })}
+          value={comments}
+          onChange={(e) => onCommentsChange(e.target.value)}
           placeholder="Notas internas sobre este perro (comportamiento, preferencias, recordatorios)…"
           rows={3}
           style={{
@@ -1748,7 +1780,7 @@ function ClientDetailPanel({ h }) {
             background: C.cream, boxSizing: 'border-box',
           }}
         />
-        <div style={{ fontSize: 11, opacity: 0.5, marginTop: 3 }}>Se guarda automáticamente en este dispositivo.</div>
+        <div style={{ fontSize: 11, opacity: 0.5, marginTop: 3 }}>Se guarda automáticamente y se comparte con el equipo.</div>
       </div>
 
       {(h.id || h.submittedAt) && (
@@ -2021,6 +2053,7 @@ export default function App() {
   const [hubspot, setHubspot] = useState([]);
   const [calendlyEvents, setCalendlyEvents] = useState([]);
   const [bridgeReservations, setBridgeReservations] = useState([]);
+  const [dogExtras, setDogExtras] = useState({});
   const [fetchErrors, setFetchErrors] = useState({ mews: null, hubspot: null, calendly: null, bridge: null });
 
   /* ---- load config + cache ---- */
@@ -2064,6 +2097,7 @@ export default function App() {
           departure: r.departure ? new Date(r.departure) : null,
         }));
         setBridgeReservations(bridgeRehydrated);
+        if (cache.dogExtras && typeof cache.dogExtras === 'object') setDogExtras(cache.dogExtras);
       }
     } catch {}
   }, []);
@@ -2115,12 +2149,22 @@ export default function App() {
       }
     }
 
+    let dogExtrasMap = null;
+    if (cfg.hubspotUrl) {
+      try {
+        dogExtrasMap = await fetchDogExtras(cfg.hubspotUrl, cfg.hubspotKey);
+      } catch {
+        // dog_extras tab missing or unreachable — keep whatever we already have
+      }
+    }
+
     const { merged: mergedRows, pending: pendingRows } = mergeReservations(mewsRows, hubspotRows);
     setMerged(mergedRows);
     setPending(pendingRows);
     setHubspot(hubspotRows);
     setCalendlyEvents(calendlyRows);
     setBridgeReservations(bridgeRows);
+    if (dogExtrasMap) setDogExtras(dogExtrasMap);
     setFetchErrors(errors);
 
     // Save to cache for resilience
@@ -2150,6 +2194,7 @@ export default function App() {
           arrival: r.arrival?.toISOString() || null,
           departure: r.departure?.toISOString() || null,
         })),
+        dogExtras: dogExtrasMap || dogExtras,
       };
       try {
         await storage.set(STORAGE_KEYS.cache, JSON.stringify(cache), true);
@@ -2162,7 +2207,7 @@ export default function App() {
     }
 
     setTimeout(() => setRefreshing(false), 500);
-  }, [config, meta]);
+  }, [config, meta, dogExtras]);
 
   useEffect(() => {
     (async () => {
@@ -2194,6 +2239,22 @@ export default function App() {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
+
+  // Optimistically update local state and write the full {comments, photo} to
+  // the bridge (sending both so one field never blanks the other). The write
+  // is fire-and-forget; the next refresh reconciles if it fails.
+  const saveDogExtra = useCallback((dogId, patch) => {
+    if (!dogId) return;
+    setDogExtras((prev) => {
+      const current = prev[dogId] || { comments: '', photo: '' };
+      const next = { ...current, ...patch };
+      saveDogExtras(config.hubspotUrl, config.hubspotKey, dogId, {
+        comments: next.comments || '',
+        photo: next.photo || '',
+      }).catch(() => { /* fire-and-forget; reconciled on next refresh */ });
+      return { ...prev, [dogId]: next };
+    });
+  }, [config.hubspotUrl, config.hubspotKey]);
 
   const switchMode = (m) => navigate(m === 'admin' ? '#admin' : '#/dashboard');
 
@@ -2317,7 +2378,7 @@ export default function App() {
         routeBody = <MonthlyView reservations={bridgeReservations} capacity={meta.capacity} now={now} error={fetchErrors.bridge} configured={!!config.bridgeUrl} />;
         break;
       case '#/clients':
-        routeBody = <ClientsView hubspot={hubspot} merged={merged} pending={pending} />;
+        routeBody = <ClientsView hubspot={hubspot} merged={merged} pending={pending} dogExtras={dogExtras} onSaveExtra={saveDogExtra} />;
         break;
       case '#/transports':
         routeBody = <TransportsView merged={merged} />;
