@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { requestLink, getRecord, saveRecord, isConfigured } from './api.js';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { requestLink, getRecord, saveRecord, savePhoto, isConfigured } from './api.js';
 import { SECTIONS, EDITABLE_HEADERS, EMAIL_HEADER } from './fields.js';
 
 const C = {
@@ -33,7 +33,33 @@ function tokenFromUrl() {
 function blankRecord() {
   const fields = {};
   EDITABLE_HEADERS.forEach((h) => { fields[h] = ''; });
-  return { id: '', fields, _new: true };
+  return { id: '', fields, photo: '', _new: true };
+}
+
+// Downscale a picked image to a small square JPEG data URL (cover-cropped,
+// centered) so it fits in a single Google Sheets cell. Mirrors the dashboard.
+function downscaleToDataUrl(file, size = 256, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('No se pudo leer la imagen.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Archivo de imagen no válido.'));
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const scale = Math.max(size / img.width, size / img.height);
+        const w = img.width * scale;
+        const h = img.height * scale;
+        ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 export default function Portal() {
@@ -47,6 +73,7 @@ export default function Portal() {
   const [selected, setSelected] = useState(0);
   const [form, setForm] = useState({});
   const [saveState, setSaveState] = useState('idle'); // idle | saving | saved | error
+  const [photoState, setPhotoState] = useState('idle'); // idle | saving | saved | error | needsave
 
   // Load the customer's record(s) once we have a token.
   useEffect(() => {
@@ -55,10 +82,11 @@ export default function Portal() {
     getRecord(token)
       .then((data) => {
         if (!alive) return;
-        const recs = (data.records || []).map((fields) => ({
-          id: String(fields['Conversion ID'] || fields['Contact ID'] || ''),
-          fields,
-        }));
+        const photos = data.photos || {};
+        const recs = (data.records || []).map((fields) => {
+          const id = String(fields['Conversion ID'] || fields['Contact ID'] || '');
+          return { id, fields, photo: photos[id] || '' };
+        });
         setRecords(recs.length ? recs : [blankRecord()]);
         setStatus('ready');
       })
@@ -81,6 +109,10 @@ export default function Portal() {
     setForm(f);
     setSaveState('idle');
   }, [records, selected]);
+
+  // Reset the photo indicator only when switching dogs (not on every records
+  // change), so the "✓ Foto guardada" message survives the photo write.
+  useEffect(() => { setPhotoState('idle'); }, [selected]);
 
   const onField = useCallback((header, value) => {
     setForm((prev) => ({ ...prev, [header]: value }));
@@ -110,11 +142,27 @@ export default function Portal() {
       setRecords((prev) => prev.map((r, i) => {
         if (i !== selected) return r;
         const merged = { ...r.fields, ...form };
-        return { id: res.id || r.id, fields: merged };
+        return { ...r, id: res.id || r.id, fields: merged };
       }));
       setSaveState('saved');
     } catch (err) {
       setSaveState('error');
+      setMessage(err.message);
+    }
+  };
+
+  // dataUrl: a JPEG data URL to set, or '' to remove the photo.
+  const onSavePhoto = async (dataUrl) => {
+    const rec = records[selected];
+    if (!rec) return;
+    if (!rec.id) { setPhotoState('needsave'); return; } // must save the dog first
+    setPhotoState('saving');
+    try {
+      await savePhoto(token, rec.id, dataUrl);
+      setRecords((prev) => prev.map((r, i) => (i === selected ? { ...r, photo: dataUrl } : r)));
+      setPhotoState('saved');
+    } catch (err) {
+      setPhotoState('error');
       setMessage(err.message);
     }
   };
@@ -162,6 +210,8 @@ export default function Portal() {
             saveState={saveState}
             message={message}
             onAddDog={addDog}
+            photoState={photoState}
+            onSavePhoto={onSavePhoto}
           />
         )}
       </main>
@@ -208,8 +258,9 @@ function LoginCard({ email, setEmail, onSubmit, message }) {
   );
 }
 
-function RecordEditor({ records, selected, setSelected, form, onField, onSave, saveState, message, onAddDog }) {
+function RecordEditor({ records, selected, setSelected, form, onField, onSave, saveState, message, onAddDog, photoState, onSavePhoto }) {
   const dogName = (r) => r.fields['Nombre del perro'] || (r._new ? 'Nuevo perro' : 'Sin nombre');
+  const current = records[selected];
   return (
     <div>
       {records.length > 1 && (
@@ -229,6 +280,14 @@ function RecordEditor({ records, selected, setSelected, form, onField, onSave, s
           ))}
         </div>
       )}
+
+      <PhotoCard
+        photo={current ? current.photo : ''}
+        dogName={current ? (current.fields['Nombre del perro'] || '') : ''}
+        canEdit={!!(current && current.id)}
+        state={photoState}
+        onChange={onSavePhoto}
+      />
 
       {SECTIONS.map((section) => (
         <Card key={section.title}>
@@ -255,6 +314,88 @@ function RecordEditor({ records, selected, setSelected, form, onField, onSave, s
         </button>
       </div>
     </div>
+  );
+}
+
+function PhotoCard({ photo, dogName, canEdit, state, onChange }) {
+  const inputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const initial = (dogName || '').trim().charAt(0).toUpperCase() || '🐶';
+
+  const pick = () => { if (inputRef.current) inputRef.current.click(); };
+
+  const onFile = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+    setBusy(true);
+    try {
+      const dataUrl = await downscaleToDataUrl(file);
+      await onChange(dataUrl);
+    } catch (err) {
+      // downscale errors surface via the parent's error state on the next save;
+      // for a local read failure just stop the spinner.
+      console.error(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card>
+      <h3 style={{ ...h2Style, fontSize: 22 }}>Foto de tu perro</h3>
+      <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div
+          style={{
+            width: 120, height: 120, borderRadius: 16, flexShrink: 0,
+            border: `1.5px solid ${C.ink15}`, background: photo ? `#fff url(${photo}) center/cover no-repeat` : C.ink,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: C.cream, fontFamily: "'Cooper BT', Georgia, serif", fontSize: 48, fontWeight: 300,
+          }}
+        >
+          {!photo && initial}
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {canEdit ? (
+            <>
+              <input ref={inputRef} type="file" accept="image/*" onChange={onFile} style={{ display: 'none' }} />
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={pick}
+                  disabled={busy || state === 'saving'}
+                  style={{ ...btnStyle, opacity: (busy || state === 'saving') ? 0.6 : 1 }}
+                >
+                  {busy || state === 'saving' ? 'Subiendo…' : (photo ? 'Cambiar foto' : 'Subir foto')}
+                </button>
+                {photo && (
+                  <button
+                    type="button"
+                    onClick={() => onChange('')}
+                    disabled={busy || state === 'saving'}
+                    style={{ ...btnStyle, background: 'transparent', color: C.brick, border: `1.5px solid ${C.brick}` }}
+                  >
+                    Quitar foto
+                  </button>
+                )}
+              </div>
+              {state === 'saved' && (
+                <span style={{ color: C.ink, fontWeight: 700, fontSize: 13, letterSpacing: '0.06em' }}>✓ Foto guardada</span>
+              )}
+              {state === 'error' && (
+                <span style={{ color: C.brick, fontWeight: 700, fontSize: 13 }}>No se pudo guardar la foto.</span>
+              )}
+              <span style={{ fontSize: 12, opacity: 0.6 }}>JPG o PNG. La recortamos a un cuadrado pequeño automáticamente.</span>
+            </>
+          ) : (
+            <span style={{ fontSize: 13, opacity: 0.7, lineHeight: 1.5 }}>
+              Guarda primero los datos del perro para poder añadir una foto.
+            </span>
+          )}
+        </div>
+      </div>
+    </Card>
   );
 }
 

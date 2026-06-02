@@ -36,3 +36,7 @@ export function getRecord(token) {
 export function saveRecord(token, id, fields) {
   return post({ action: 'saveRecord', token, id, fields });
 }
+
+export function savePhoto(token, id, photo) {
+  return post({ action: 'savePhoto', token, id, photo });
+}
