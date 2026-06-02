@@ -390,7 +390,7 @@ function PhotoCard({ photo, dogName, canEdit, state, onChange }) {
             </>
           ) : (
             <span style={{ fontSize: 13, opacity: 0.7, lineHeight: 1.5 }}>
-              Guarda primero los datos del perro para poder añadir una foto.
+              Rellena los datos del perro y pulsa «Guardar cambios» más abajo. Después podrás añadir una foto aquí.
             </span>
           )}
         </div>
