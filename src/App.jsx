@@ -685,6 +685,11 @@ const STORAGE_KEYS = {
   cache: 'doggos_cache',
 };
 
+// Per-dog editable extras (photo + free-text comments), keyed by HubSpot id.
+// Stored separately from the read-only HubSpot cache so a data refresh never
+// clobbers what the staff typed.
+const DOG_EXTRAS_PREFIX = 'doggos_dog_';
+
 const DEFAULT_CONFIG = {
   mewsUrl: '',
   mewsKey: '',
@@ -1468,9 +1473,111 @@ function ClientRow({ h }) {
   );
 }
 
+// Loads/saves a dog's photo + comments. Kept out of the HubSpot cache so a
+// data refresh never overwrites staff-entered notes.
+function useDogExtras(id) {
+  const [extras, setExtras] = useState({ photo: '', comments: '' });
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!id) { setLoaded(true); return; }
+      try {
+        const rec = await storage.get(DOG_EXTRAS_PREFIX + id, true);
+        if (alive && rec?.value) setExtras({ photo: '', comments: '', ...JSON.parse(rec.value) });
+      } catch { /* corrupt entry — start fresh */ }
+      if (alive) setLoaded(true);
+    })();
+    return () => { alive = false; };
+  }, [id]);
+
+  const update = useCallback((patch) => {
+    setExtras((prev) => {
+      const next = { ...prev, ...patch };
+      if (id) storage.set(DOG_EXTRAS_PREFIX + id, JSON.stringify(next), true);
+      return next;
+    });
+  }, [id]);
+
+  return { extras, update, loaded };
+}
+
+// Square avatar with click-to-upload. Downscales to 256px JPEG so a phone
+// photo doesn't blow past the localStorage quota.
+function DogPhoto({ photo, name, onChange }) {
+  const inputRef = useRef(null);
+
+  const handleFile = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const size = 256;
+        const canvas = document.createElement('canvas');
+        canvas.width = size; canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const scale = Math.max(size / img.width, size / img.height);
+        const w = img.width * scale, hgt = img.height * scale;
+        ctx.drawImage(img, (size - w) / 2, (size - hgt) / 2, w, hgt);
+        onChange(canvas.toDataURL('image/jpeg', 0.82));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const initial = (name || '?').trim().charAt(0).toUpperCase();
+
+  return (
+    <div style={{ flexShrink: 0 }}>
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        title={photo ? 'Cambiar foto' : 'Añadir foto'}
+        style={{
+          width: 96, height: 96, borderRadius: 14, padding: 0, cursor: 'pointer',
+          overflow: 'hidden', position: 'relative',
+          border: `1px solid ${photo ? 'rgba(33,57,44,0.18)' : 'rgba(33,57,44,0.25)'}`,
+          background: photo ? C.cream : 'rgba(33,57,44,0.05)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        {photo ? (
+          <img src={photo} alt={name || 'Foto del perro'} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        ) : (
+          <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, color: C.ink, opacity: 0.55 }}>
+            <span className="display" style={{ fontSize: 30, lineHeight: 1 }}>{initial}</span>
+            <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.04em' }}>+ Foto</span>
+          </span>
+        )}
+      </button>
+      {photo && (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          style={{
+            display: 'block', width: 96, marginTop: 4, padding: '2px 0',
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: C.brick, fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
+          }}
+        >
+          Quitar foto
+        </button>
+      )}
+      <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} style={{ display: 'none' }} />
+    </div>
+  );
+}
+
 function ClientDetailPanel({ h }) {
+  const { extras, update } = useDogExtras(h.id);
   const yesNo = (v) => v === true ? 'Sí' : v === false ? 'No' : '—';
   const sterilizedText = yesNo(h.sterilized);
+  const headline = [h.breed, h.size, h.sex, h.age && `${h.age} años`].filter(Boolean).join(' · ');
 
   const profile = [
     ['Raza', h.breed], ['Tamaño', h.size], ['Sexo', h.sex],
@@ -1516,6 +1623,31 @@ function ClientDetailPanel({ h }) {
       background: 'rgba(120, 217, 216, 0.06)',
       display: 'flex', flexDirection: 'column', gap: 14,
     }}>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        <DogPhoto photo={extras.photo} name={h.pet} onChange={(photo) => update({ photo })} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="display" style={{ fontSize: 24, lineHeight: 1.05, color: C.ink }}>{h.pet || '—'}</div>
+          {h.guest && <div style={{ fontSize: 13, opacity: 0.7, marginTop: 2 }}>{h.guest}</div>}
+          {headline && <div style={{ fontSize: 13, opacity: 0.85, marginTop: 6 }}>{headline}</div>}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+            {allergiesText !== 'Ninguna' && (
+              <span style={{
+                padding: '3px 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 600,
+                background: 'rgba(162, 58, 42, 0.1)', color: C.brick,
+                border: '1px solid rgba(162, 58, 42, 0.3)',
+              }}>Alergias: {allergiesText}</span>
+            )}
+            {pathologiesText !== 'Ninguna' && (
+              <span style={{
+                padding: '3px 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 600,
+                background: 'rgba(191, 178, 0, 0.12)', color: C.ink,
+                border: '1px solid rgba(191, 178, 0, 0.4)',
+              }}>Patología: {pathologiesText}</span>
+            )}
+          </div>
+        </div>
+      </div>
+
       <Section title="Contacto" rows={contactRows} />
       <Section title="Perfil del perro" rows={profile} />
       <Section title="Estancia" rows={stay} />
@@ -1581,6 +1713,23 @@ function ClientDetailPanel({ h }) {
           )}
         </div>
       )}
+
+      <div>
+        <SectionHeader>Comentarios del equipo</SectionHeader>
+        <textarea
+          value={extras.comments}
+          onChange={(e) => update({ comments: e.target.value })}
+          placeholder="Notas internas sobre este perro (comportamiento, preferencias, recordatorios)…"
+          rows={3}
+          style={{
+            width: '100%', resize: 'vertical', padding: '10px 12px',
+            border: '1px solid rgba(33, 57, 44, 0.2)', borderRadius: 8,
+            fontSize: 13.5, lineHeight: 1.45, fontFamily: 'inherit', color: C.ink,
+            background: C.cream, boxSizing: 'border-box',
+          }}
+        />
+        <div style={{ fontSize: 11, opacity: 0.5, marginTop: 3 }}>Se guarda automáticamente en este dispositivo.</div>
+      </div>
 
       <Section title="Veterinario y emergencias" rows={vet} />
 
