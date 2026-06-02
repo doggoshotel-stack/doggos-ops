@@ -74,6 +74,22 @@ export const SECTIONS = [
       { header: 'Contacto emergencia 2', label: 'Contacto de emergencia 2', type: 'text' },
     ],
   },
+  {
+    title: 'Confirmación',
+    fields: [
+      { header: '¿Cómo nos conociste?', label: '¿Cómo nos conociste?', type: 'text' },
+      { header: 'Firma digital', label: 'Firma digital', type: 'text' },
+      // Stored as a checkbox in the intake form: the cell holds the full
+      // acceptance sentence when checked, or is blank when not. We keep that
+      // exact value so the sheet stays byte-compatible with the original form.
+      {
+        header: 'Declaración de aceptación de condiciones',
+        label: 'He leído y acepto las condiciones generales del servicio',
+        type: 'checkbox',
+        checkedValue: 'He leído y acepto las condiciones generales del servicio.',
+      },
+    ],
+  },
 ];
 
 // Flat list of every editable header (what we send back on save).

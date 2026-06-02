@@ -400,6 +400,22 @@ function PhotoCard({ photo, dogName, canEdit, state, onChange }) {
 }
 
 function Field({ field, value, onChange }) {
+  // A checkbox stores the configured `checkedValue` string when ticked, or ''
+  // when not — preserving byte-compatibility with the original intake form.
+  if (field.type === 'checkbox') {
+    const checked = value === field.checkedValue;
+    return (
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', gridColumn: '1 / -1' }}>
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked ? field.checkedValue : '')}
+          style={{ width: 18, height: 18, marginTop: 2, accentColor: C.ink, flexShrink: 0 }}
+        />
+        <span style={{ fontSize: 14, lineHeight: 1.4 }}>{field.label}</span>
+      </label>
+    );
+  }
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', opacity: 0.65 }}>
