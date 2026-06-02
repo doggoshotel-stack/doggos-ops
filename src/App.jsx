@@ -127,6 +127,8 @@ html, body, #root { width: 100%; height: 100%; }
 }
 .row.celeste-tint { background: rgba(120, 217, 216, 0.12); }
 .row.amarillo-tint { background: rgba(245, 245, 61, 0.14); }
+.row.clickable { cursor: pointer; transition: background 200ms ease, box-shadow 160ms ease; }
+.row.clickable:hover { box-shadow: 0 0 0 1.5px ${C.ink}; }
 
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 999px; }
 .dot.pulse { animation: pulse 2.4s ease-in-out infinite; }
@@ -819,6 +821,18 @@ function navigate(hash) {
   if (typeof window !== 'undefined') window.location.hash = hash;
 }
 
+// Deep-link support for the Clientes ficha: #/clients/<hubspotId>.
+function clientFocusFromRoute(route) {
+  const prefix = '#/clients/';
+  return route.startsWith(prefix) ? decodeURIComponent(route.slice(prefix.length)) : null;
+}
+
+function isNavActive(route, hash) {
+  if (route === hash) return true;
+  if (hash === '#/clients' && route.startsWith('#/clients/')) return true;
+  return false;
+}
+
 function useRoute() {
   const [route, setRoute] = useState(getRoute);
   useEffect(() => {
@@ -964,7 +978,7 @@ function Sidebar({ route, collapsed, onToggle, isManagement, onLogout }) {
       </div>
       <nav style={{ display: 'flex', flexDirection: 'column', padding: '12px 8px', gap: 4, flex: 1, overflow: 'auto' }}>
         {NAV_ITEMS.map((item) => {
-          const active = route === item.hash;
+          const active = isNavActive(route, item.hash);
           return (
             <button
               key={item.hash}
@@ -1141,7 +1155,7 @@ function MobileDrawer({ open, onClose, route, isManagement, onLogout }) {
         </div>
         <nav style={{ display: 'flex', flexDirection: 'column', padding: '12px 10px', gap: 4, flex: 1 }}>
           {NAV_ITEMS.map((item) => (
-            <button key={item.hash} onClick={() => go(item.hash)} style={itemStyle(route === item.hash)}>
+            <button key={item.hash} onClick={() => go(item.hash)} style={itemStyle(isNavActive(route, item.hash))}>
               <span style={{ display: 'flex', flex: 'none' }}>{item.icon}</span>
               <span>{item.label}</span>
             </button>
@@ -1521,9 +1535,18 @@ function InHouseView({ merged }) {
   );
 }
 
-function ClientsView({ hubspot, merged, pending, dogExtras, onSaveExtra }) {
+function ClientsView({ hubspot, merged, pending, dogExtras, onSaveExtra, focusId }) {
   const isMobile = useIsMobile();
   const [query, setQuery] = useState('');
+
+  // When deep-linked from the dashboard (#/clients/<id>), scroll the focused
+  // ficha into view. ClientRow auto-expands itself via the autoExpand prop.
+  useEffect(() => {
+    if (!focusId) return;
+    const el = document.getElementById(`client-${focusId}`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [focusId]);
+
   const unique = useMemo(() => {
     // Primary source: every parsed HubSpot row, regardless of arrival date.
     // Falls back to merged + pending if hubspot prop is missing (warm cache before refresh).
@@ -1582,21 +1605,22 @@ function ClientsView({ hubspot, merged, pending, dogExtras, onSaveExtra }) {
             {query ? 'Sin coincidencias.' : 'Sin fichas HubSpot.'}
           </div>
         ) : (
-          filtered.map((h) => <ClientRow key={h.id} h={h} extra={dogExtras?.[h.id]} onSaveExtra={onSaveExtra} />)
+          filtered.map((h) => <ClientRow key={h.id} h={h} extra={dogExtras?.[h.id]} onSaveExtra={onSaveExtra} autoExpand={!!focusId && h.id === focusId} />)
         )}
       </div>
     </div>
   );
 }
 
-function ClientRow({ h, extra, onSaveExtra }) {
-  const [expanded, setExpanded] = useState(false);
+function ClientRow({ h, extra, onSaveExtra, autoExpand = false }) {
+  const [expanded, setExpanded] = useState(autoExpand);
+  useEffect(() => { if (autoExpand) setExpanded(true); }, [autoExpand]);
   const meta = [h.breed, h.size, h.sex, h.age && `${h.age} años`, h.weight && `${h.weight} kg`].filter(Boolean).join(' · ');
   const contact = [h.email, h.phone, h.address].filter(Boolean).join(' · ');
   return (
-    <div style={{
+    <div id={`client-${h.id}`} style={{
       marginBottom: 8,
-      background: C.cream, border: '1px solid rgba(33, 57, 44, 0.12)',
+      background: C.cream, border: `1px solid ${autoExpand ? C.ink : 'rgba(33, 57, 44, 0.12)'}`,
       borderRadius: 10, overflow: 'hidden',
     }}>
       <button
@@ -2520,6 +2544,17 @@ export default function App() {
         now={now}
       />
     );
+  } else if (route === '#/clients' || route.startsWith('#/clients/')) {
+    routeBody = (
+      <ClientsView
+        hubspot={hubspot}
+        merged={merged}
+        pending={pending}
+        dogExtras={dogExtras}
+        onSaveExtra={saveDogExtra}
+        focusId={clientFocusFromRoute(route)}
+      />
+    );
   } else {
     switch (route) {
       case '#/arrivals/today':
@@ -2533,9 +2568,6 @@ export default function App() {
         break;
       case '#/mensual':
         routeBody = <MonthlyView reservations={bridgeReservations} capacity={meta.capacity} now={now} error={fetchErrors.bridge} configured={!!config.bridgeUrl} />;
-        break;
-      case '#/clients':
-        routeBody = <ClientsView hubspot={hubspot} merged={merged} pending={pending} dogExtras={dogExtras} onSaveExtra={saveDogExtra} />;
         break;
       case '#/transports':
         routeBody = <TransportsView merged={merged} />;
@@ -3203,8 +3235,17 @@ function GuestRow({ r, time, variant }) {
   const eyebrowIcon = variant === 'arrival' ? '↘' : variant === 'departure' ? '↗' : '●';
   const eyebrowColor = variant === 'arrival' ? C.ink : variant === 'departure' ? C.ocre : C.celeste;
   const breedSize = [r.breed, r.size].filter(Boolean).join(' · ');
+  const clickable = !!r.hubspotId;
+  const openFicha = clickable ? () => navigate(`#/clients/${encodeURIComponent(r.hubspotId)}`) : undefined;
   return (
-    <div className={`row fade-in ${tint}`}>
+    <div
+      className={`row fade-in ${tint}${clickable ? ' clickable' : ''}`}
+      onClick={openFicha}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFicha(); } } : undefined}
+      title={clickable ? 'Ver ficha del cliente' : undefined}
+    >
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
         <span className="eyebrow tabular" style={{ color: eyebrowColor }}>
           {eyebrowIcon} {eyebrowLabel}
@@ -3239,8 +3280,17 @@ function GuestRow({ r, time, variant }) {
 
 function AlertRow({ res, flags }) {
   const tint = ALERT_STYLES[flags[0]?.type]?.tint || '';
+  const clickable = !!res.hubspotId;
+  const openFicha = clickable ? () => navigate(`#/clients/${encodeURIComponent(res.hubspotId)}`) : undefined;
   return (
-    <div className={`row fade-in ${tint}`}>
+    <div
+      className={`row fade-in ${tint}${clickable ? ' clickable' : ''}`}
+      onClick={openFicha}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFicha(); } } : undefined}
+      title={clickable ? 'Ver ficha del cliente' : undefined}
+    >
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
         <span className="display" style={{ fontSize: 22, lineHeight: 1 }}>{res.pet || res.guest}</span>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end' }}>
