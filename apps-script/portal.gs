@@ -181,8 +181,16 @@ function handleSaveRecord_(body) {
   }
 
   if (match) {
+    // Ensure the row has a stable id so the customer can attach a photo
+    // (photos are keyed by dog_id in dog_extras). Rows imported without a
+    // Conversion/Contact ID get one assigned here, once.
+    var ensuredId = match.id;
+    if (idCol >= 0 && !ensuredId) {
+      ensuredId = Utilities.getUuid();
+      sheet.getRange(match.rowIndex, idCol + 1).setValue(ensuredId);
+    }
     // Update only known, non-identity columns. Never let the client move a
-    // row to a different email.
+    // row to a different email or change its id.
     for (var h = 0; h < headers.length; h++) {
       var header = headers[h];
       if (h === emailCol || h === idCol) continue;
@@ -190,7 +198,7 @@ function handleSaveRecord_(body) {
         sheet.getRange(match.rowIndex, h + 1).setValue(incoming[header]);
       }
     }
-    return jsonOut_({ ok: true, rowIndex: match.rowIndex, id: match.id });
+    return jsonOut_({ ok: true, rowIndex: match.rowIndex, id: ensuredId });
   }
 
   // No existing row → append a new dog for this customer.
