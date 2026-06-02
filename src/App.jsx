@@ -2706,7 +2706,7 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
           </div>
         </div>
 
-        <div style={{ textAlign: isMobile ? 'left' : 'center', flex: 1 }}>
+        <div style={{ textAlign: 'center', flex: 1 }}>
           <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
             <span className="display tabular" style={{ fontSize: isMobile ? 40 : 56, color: C.ink }}>{timeLabel}</span>
             <span className="display tabular" style={{ fontSize: isMobile ? 22 : 28, color: C.ink, opacity: 0.45 }}>:{secLabel}</span>
