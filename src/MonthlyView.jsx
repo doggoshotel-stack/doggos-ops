@@ -342,6 +342,17 @@ function DayDetailModal({ day, reservations, onClose }) {
     && isSameYMD(r.departure, day.date)
   ).sort((a, b) => a.departure - b.departure), [reservations, day.date]);
 
+  // Dogs occupying this day: arrival.dateOnly <= day < departure.dateOnly
+  // (same rule as the occupancy count, so this list matches "X en casa").
+  const inHouse = useMemo(() => reservations.filter(r => {
+    if (!r || !VALID_STATUS.has(r.status)) return false;
+    if (!r.arrival || isNaN(r.arrival.getTime())) return false;
+    if (!r.departure || isNaN(r.departure.getTime())) return false;
+    const arrDay = new Date(r.arrival.getFullYear(), r.arrival.getMonth(), r.arrival.getDate());
+    const depDay = new Date(r.departure.getFullYear(), r.departure.getMonth(), r.departure.getDate());
+    return day.date >= arrDay && day.date < depDay;
+  }).sort((a, b) => a.departure - b.departure), [reservations, day.date]);
+
   const dateLabel = day.date.toLocaleDateString('es-ES', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   });
@@ -408,17 +419,27 @@ function DayDetailModal({ day, reservations, onClose }) {
             items={departures}
             timeKey="departure"
           />
+          <DaySection
+            title="En casa"
+            count={inHouse.length}
+            pillBg={C.ink}
+            pillFg={C.amarillo}
+            arrow="N"
+            items={inHouse}
+            timeKey="departure"
+            formatRight={(r) => `sale ${r.departure.getDate()}/${r.departure.getMonth() + 1}`}
+          />
         </div>
       </div>
     </div>
   );
 }
 
-function DaySection({ title, count, pillBg, arrow, items, timeKey }) {
+function DaySection({ title, count, pillBg, pillFg = C.ink, arrow, items, timeKey, formatRight }) {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-        <span style={{ background: pillBg, color: C.ink, fontSize: 12, fontWeight: 700, padding: '4px 12px', borderRadius: 999, letterSpacing: '0.05em' }}>
+        <span style={{ background: pillBg, color: pillFg, fontSize: 12, fontWeight: 700, padding: '4px 12px', borderRadius: 999, letterSpacing: '0.05em' }}>
           {arrow} {count}
         </span>
         <span className="eyebrow eyebrow-sm" style={{ opacity: 0.75 }}>{title.toUpperCase()}</span>
@@ -429,7 +450,7 @@ function DaySection({ title, count, pillBg, arrow, items, timeKey }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {items.map((r) => {
             const t = r[timeKey];
-            const time = t.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+            const time = formatRight ? formatRight(r) : t.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
             const spaceLabel = [r.spaceCategory, r.spaceNumber].filter(Boolean).join(' · ');
             return (
               <div
