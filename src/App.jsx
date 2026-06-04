@@ -680,6 +680,43 @@ const DEMO_CALENDLY = [
   { source: 'calendly', id: 'cal-5', eventType: 'llamada-onboarding', eventName: 'Llamada onboarding nuevo cliente', host: 'Laura Ellison', time: offsetDate(1, 17), location: 'Zoom', meetingUrl: 'https://zoom.us/...', invitee: 'Pol Carreras', email: 'pol@example.com', kind: 'call' },
 ];
 
+// Synthetic bridge (Mews "vista mensual") rows for demoing the Management P&L.
+// Each booking gets a created timestamp = arrival − lead, and we only emit
+// bookings already created as of `now`, so future months come out partially
+// booked — letting the pace/forecast model project their close. Opening was
+// Oct 2025, so no created date is earlier than that.
+function buildDemoBridge(now = new Date()) {
+  const open = new Date(2025, 9, 1);
+  const leads = [110, 75, 52, 40, 30, 22, 16, 11, 7, 4, 2, 1];
+  const out = [];
+  let n = 7000;
+  for (let m = 0; m < 12; m++) {
+    const count = 10 + (m % 5) * 2;
+    for (let i = 0; i < count; i++) {
+      const day = 1 + ((i * 5 + m * 3) % 27);
+      const nights = 1 + ((i + m) % 6);
+      const arrival = new Date(2026, m, day, 11, 0, 0);
+      const departure = new Date(2026, m, day + nights, 11, 0, 0);
+      const lead = leads[(i + m) % leads.length];
+      let created = new Date(arrival.getTime() - lead * 86400000);
+      if (created < open) created = new Date(open.getTime());
+      if (created > now) continue; // not booked yet — stays out of the books
+      out.push({
+        number: `BR-${n++}`,
+        customer: `Demo Cliente ${m + 1}-${i + 1}`,
+        status: arrival < now ? 'Checked out' : 'Confirmed',
+        arrival, departure, created,
+        spaceNumber: String((i % 42) + 1),
+        spaceCategory: 'Estándar',
+        nights,
+        personCount: 1,
+        totalAmount: 250 + nights * 32 + (i % 4) * 28,
+      });
+    }
+  }
+  return out;
+}
+
 /* ----------------------- brand SVG motifs ----------------------- */
 
 const PeakTL = ({ height = 70 }) => (
@@ -756,6 +793,37 @@ function parseBridgeAmount(v) {
   return isNaN(n) ? 0 : n;
 }
 
+// Parse a day-first date(-time): "DD-MM-YYYY", "D/M/YY", optionally with a
+// "HH:MM" / "HH:MM:SS" time. The Mews export's Created column is day-first, which
+// new Date() misreads, so we parse the parts explicitly and fall back to native
+// parsing only for ISO-style strings / Date objects.
+function parseDMYDateTime(v) {
+  if (v == null || v === '') return null;
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
+  const s = String(v).trim();
+  const m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (m) {
+    const [, d, mo, yRaw, hh, mm, ss] = m;
+    const y = yRaw.length === 2 ? 2000 + Number(yRaw) : Number(yRaw);
+    const date = new Date(y, Number(mo) - 1, Number(d), Number(hh || 0), Number(mm || 0), Number(ss || 0));
+    return isNaN(date.getTime()) ? null : date;
+  }
+  const d2 = new Date(s);
+  return isNaN(d2.getTime()) ? null : d2;
+}
+
+// The Mews "vista mensual" export carries a reservation-created timestamp in
+// column M, header "Created" (day-first date + time). We pin that header, then
+// fall back to a name match / column position so a renamed export still works.
+function parseBridgeCreated(row) {
+  const keys = Object.keys(row);
+  let key = keys.includes('Created')
+    ? 'Created'
+    : keys.find((k) => /creat|reserv|booked|creaci|alta/i.test(k));
+  if (!key && keys.length > 12) key = keys[12];
+  return key ? parseDMYDateTime(row[key]) : null;
+}
+
 function parseBridgeRow(row) {
   return {
     number: row.Number,
@@ -763,6 +831,7 @@ function parseBridgeRow(row) {
     status: row.Status || '',
     arrival: parseBridgeDate(row.Arrival),
     departure: parseBridgeDate(row.Departure),
+    created: parseBridgeCreated(row),
     spaceNumber: row['Space number'] != null ? String(row['Space number']) : '',
     spaceCategory: row['Space category'] || '',
     nights: Number(row['Count (days)']) || 0,
@@ -2594,6 +2663,7 @@ export default function App() {
       guest: `Demo ${i + 1}`, pet: `Pet ${i + 1}`, arrival: offsetDate(i + 3, 10), email: `demo${i}@example.com`,
     })));
     setCalendlyEvents(DEMO_CALENDLY);
+    setBridgeReservations(buildDemoBridge());
     const newMeta = { ...meta, lastUpdated: new Date().toISOString() };
     await storage.set(STORAGE_KEYS.meta, JSON.stringify(newMeta), true);
     setMeta(newMeta);
