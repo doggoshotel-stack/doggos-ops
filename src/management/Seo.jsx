@@ -60,7 +60,114 @@ function fmtEUR(n, opts = {}) {
   return `${Math.round(n).toLocaleString('es-ES')}€`;
 }
 
-export default function Seo() {
+export default function Seo({ data, error }) {
+  // Real Google Search Console data when the bridge is connected; otherwise the
+  // sample mockup. Ads / Google Business cards stay as "pending" until those
+  // sources exist (GSC only covers organic search).
+  if (data && data.summary) return <SeoReal data={data} />;
+  return <SeoMock error={error} />;
+}
+
+function pctChange(cur, prev) {
+  if (!prev) return null;
+  return (cur - prev) / prev;
+}
+function DeltaPct({ value, invert }) {
+  if (value == null) return null;
+  const good = invert ? value < 0 : value > 0;
+  const up = value > 0;
+  return (
+    <div style={{ fontSize: 11, marginTop: 6, color: good ? C.celeste : C.brick, opacity: 0.95 }}>
+      {up ? '▲' : '▼'} {Math.abs(Math.round(value * 100))}% vs período anterior
+    </div>
+  );
+}
+
+function SeoReal({ data }) {
+  const s = data.summary;
+  const prev = data.previous || {};
+  const queries = (data.queries || []).slice(0, 12);
+  const months = data.byMonth || [];
+  const clicksMax = Math.max(1, ...months.map((m) => m.clicks));
+  const qClicksMax = Math.max(1, ...queries.map((q) => q.clicks));
+  const ctrPct = `${(s.ctr * 100).toFixed(1)}%`;
+  const updated = data.updatedAt ? new Date(data.updatedAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+
+  return (
+    <div style={{ padding: '32px 32px 80px', maxWidth: 1200, margin: '0 auto' }}>
+      <header style={{ marginBottom: 16 }}>
+        <h1 className="display" style={{ fontSize: 52, lineHeight: 0.95, color: C.ink, marginBottom: 6 }}>SEO &amp; Ads</h1>
+        <div className="eyebrow" style={{ opacity: 0.65, fontSize: 11 }}>
+          GOOGLE SEARCH CONSOLE · {data.range ? `${data.range.start} — ${data.range.end}` : 'ÚLTIMOS 28 DÍAS'} · ACTUALIZADO {updated.toUpperCase()}
+        </div>
+      </header>
+
+      <div className="tile" style={{ padding: '10px 14px', marginBottom: 20, background: 'rgba(120,217,216,0.25)', border: `1.5px solid ${C.celeste}`, fontSize: 13 }}>
+        <strong>Datos reales de Search Console.</strong> Google Ads y Perfil de Empresa aún sin conectar — esas tarjetas quedan pendientes.
+      </div>
+
+      {/* key metrics — organic (real) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 24 }}>
+        <Metric label="Clicks orgánicos · 28d" value={Math.round(s.clicks).toLocaleString('es-ES')} delta={<DeltaPct value={pctChange(s.clicks, prev.clicks)} />} highlight />
+        <Metric label="Impresiones · 28d" value={Math.round(s.impressions).toLocaleString('es-ES')} delta={<DeltaPct value={pctChange(s.impressions, prev.impressions)} />} />
+        <Metric label="CTR medio" value={ctrPct} />
+        <Metric label="Posición media" value={(Math.round(s.position * 10) / 10).toFixed(1)} delta={<DeltaPct value={pctChange(s.position, prev.position)} invert />} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: 16 }}>
+        {/* real top queries */}
+        <Card title="Búsquedas · top queries" subtitle="Lo que la gente busca y dónde apareces (Search Console)">
+          {queries.length === 0 ? (
+            <div style={{ fontSize: 13, opacity: 0.6 }}>Sin queries en el período.</div>
+          ) : queries.map((q, i) => (
+            <div key={q.query + i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.ink08}` }}>
+              <span className="display tabular" style={{ fontSize: 18, width: 34, textAlign: 'right', color: q.position <= 3 ? C.ink : 'rgba(33,57,44,0.6)' }}>{(Math.round(q.position * 10) / 10).toFixed(1)}</span>
+              <span style={{ flex: 1, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{q.query}</span>
+              <span className="eyebrow eyebrow-sm" style={{ opacity: 0.45, fontSize: 10 }}>{q.impressions} impr</span>
+              <span className="tabular" style={{ fontSize: 13, fontWeight: 700, width: 46, textAlign: 'right' }}>{q.clicks}</span>
+            </div>
+          ))}
+          <div style={{ fontSize: 10, opacity: 0.45, marginTop: 8, letterSpacing: '0.04em' }}>POSICIÓN · QUERY · IMPRESIONES · CLICKS</div>
+        </Card>
+
+        {/* organic trend (real) */}
+        <Card title="Tendencia orgánica" subtitle="Clicks desde búsqueda por mes">
+          {months.length === 0 ? (
+            <div style={{ fontSize: 13, opacity: 0.6 }}>Sin histórico todavía.</div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 120 }}>
+              {months.map((m) => (
+                <div key={m.month} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                  <span className="tabular" style={{ fontSize: 10, opacity: 0.55 }}>{m.clicks}</span>
+                  <div style={{ width: '100%', display: 'flex', alignItems: 'flex-end', height: 80 }}>
+                    <div style={{ width: '100%', height: `${(m.clicks / clicksMax) * 100}%`, background: C.ink, opacity: 0.85, borderRadius: '4px 4px 0 0' }} />
+                  </div>
+                  <span className="eyebrow eyebrow-sm" style={{ fontSize: 9, opacity: 0.55 }}>{m.month.slice(5)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        {/* pending sources */}
+        <Pending title="Google Ads" note="Conecta Google Ads para ver gasto, conversiones y CPA por campaña." />
+        <Pending title="Visibilidad local · Google Business" note="Conecta el Perfil de Empresa para ver reseñas, llamadas y «cómo llegar»." />
+      </div>
+    </div>
+  );
+}
+
+function Pending({ title, note }) {
+  return (
+    <div className="tile" style={{ padding: 20, opacity: 0.92 }}>
+      <h2 className="display" style={{ fontSize: 22, color: C.ink, margin: 0 }}>{title}</h2>
+      <div className="eyebrow eyebrow-sm" style={{ opacity: 0.55, marginTop: 2, marginBottom: 14 }}>Pendiente de conectar</div>
+      <div style={{ fontSize: 13, opacity: 0.7, lineHeight: 1.5 }}>{note}</div>
+    </div>
+  );
+}
+
+function SeoMock({ error }) {
   const spend = ADS_BY_MONTH[ADS_BY_MONTH.length - 1].spend;
   const adsConv = ADS_BY_MONTH[ADS_BY_MONTH.length - 1].conv;
   const cpa = adsConv > 0 ? spend / adsConv : 0;
@@ -184,12 +291,13 @@ function Delta({ delta }) {
   );
 }
 
-function Metric({ label, value, sub, highlight }) {
+function Metric({ label, value, sub, delta, highlight }) {
   return (
     <div className="tile dark" style={{ padding: 16 }}>
       <div className="eyebrow eyebrow-sm" style={{ color: C.cream, opacity: 0.7, fontSize: 10, letterSpacing: '0.2em' }}>{label}</div>
       <div className="display tabular" style={{ fontSize: 30, lineHeight: 1, marginTop: 6, color: highlight ? C.amarillo : C.cream }}>{value}</div>
       {sub && <div style={{ fontSize: 11, opacity: 0.6, marginTop: 6, color: C.cream }}>{sub}</div>}
+      {delta}
     </div>
   );
 }

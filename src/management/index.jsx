@@ -23,7 +23,7 @@ const MGMT_ROUTES = [
 
 export const MGMT_NAV = MGMT_ROUTES;
 
-export default function ManagementRouter({ route, reservations, capacity, now }) {
+export default function ManagementRouter({ route, reservations, capacity, now, seoData, seoError }) {
   const sub = MGMT_ROUTES.find(r => r.hash === route)?.comp || 'pnl';
 
   if (sub === 'pnl') {
@@ -35,7 +35,7 @@ export default function ManagementRouter({ route, reservations, capacity, now })
   }
 
   if (sub === 'seo') {
-    return <Seo />;
+    return <Seo data={seoData} error={seoError} />;
   }
 
   // Placeholders for future sections
