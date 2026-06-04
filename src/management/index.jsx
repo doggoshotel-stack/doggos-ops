@@ -14,9 +14,9 @@ const C = {
 const MGMT_ROUTES = [
   { hash: '#/management',          label: 'P&L anual',         comp: 'pnl' },
   { hash: '#/management/customers',label: 'Análisis clientes', comp: 'customers' },
-  { hash: '#/management/pickup',   label: 'Pickup & pace',     comp: 'pickup' },
-  { hash: '#/management/forecast', label: 'Forecast',          comp: 'forecast' },
-  { hash: '#/management/mews-sync',label: 'Mews sync',         comp: 'sync' },
+  // Pickup & pace / Forecast / Mews sync hidden for now (placeholders). The
+  // ManagementRouter still renders them if navigated to directly, so they can
+  // be re-enabled by adding their entries back here.
 ];
 
 export const MGMT_NAV = MGMT_ROUTES;
