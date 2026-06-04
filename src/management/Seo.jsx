@@ -28,6 +28,11 @@ const KEYWORDS = [
   { kw: 'residència canina terrassa', pos: 8, prev: 8, vol: 170 },
   { kw: 'hotel canino barcelona', pos: 14, prev: 19, vol: 1300 },
   { kw: 'dónde dejar el perro en vacaciones', pos: 17, prev: 22, vol: 880 },
+  // English — expat audience (Barcelona area)
+  { kw: 'dog daycare barcelona', pos: 9, prev: 15, vol: 720 },
+  { kw: 'dog boarding barcelona', pos: 12, prev: 18, vol: 1600 },
+  { kw: 'dog hotel barcelona', pos: 13, prev: 16, vol: 590 },
+  { kw: 'dog sitter terrassa', pos: 16, prev: 21, vol: 210 },
 ];
 
 const ADS_BY_MONTH = [
