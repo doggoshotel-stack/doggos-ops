@@ -1,5 +1,6 @@
 import ManagementLogin, { checkMgmtAuth, clearMgmtAuth } from './Login.jsx';
 import PnL from './PnL.jsx';
+import Customers from './Customers.jsx';
 
 export { checkMgmtAuth, clearMgmtAuth, ManagementLogin };
 
@@ -11,10 +12,11 @@ const C = {
 };
 
 const MGMT_ROUTES = [
-  { hash: '#/management',          label: 'P&L anual',     comp: 'pnl' },
-  { hash: '#/management/pickup',   label: 'Pickup & pace', comp: 'pickup' },
-  { hash: '#/management/forecast', label: 'Forecast',      comp: 'forecast' },
-  { hash: '#/management/mews-sync',label: 'Mews sync',     comp: 'sync' },
+  { hash: '#/management',          label: 'P&L anual',         comp: 'pnl' },
+  { hash: '#/management/customers',label: 'Análisis clientes', comp: 'customers' },
+  { hash: '#/management/pickup',   label: 'Pickup & pace',     comp: 'pickup' },
+  { hash: '#/management/forecast', label: 'Forecast',          comp: 'forecast' },
+  { hash: '#/management/mews-sync',label: 'Mews sync',         comp: 'sync' },
 ];
 
 export const MGMT_NAV = MGMT_ROUTES;
@@ -24,6 +26,10 @@ export default function ManagementRouter({ route, reservations, capacity, now })
 
   if (sub === 'pnl') {
     return <PnL reservations={reservations} capacity={capacity} now={now} />;
+  }
+
+  if (sub === 'customers') {
+    return <Customers reservations={reservations} now={now} />;
   }
 
   // Placeholders for future sections

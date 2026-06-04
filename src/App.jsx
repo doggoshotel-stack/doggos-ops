@@ -701,9 +701,11 @@ function buildDemoBridge(now = new Date()) {
       let created = new Date(arrival.getTime() - lead * 86400000);
       if (created < open) created = new Date(open.getTime());
       if (created > now) continue; // not booked yet — stays out of the books
+      // Draw customers from a bounded pool so some repeat (for loyalty analysis).
+      const custNo = ((m * 7 + i * 5) % 45) + 1;
       out.push({
         number: `BR-${n++}`,
-        customer: `Demo Cliente ${m + 1}-${i + 1}`,
+        customer: `Demo Cliente ${String(custNo).padStart(2, '0')}`,
         status: arrival < now ? 'Checked out' : 'Confirmed',
         arrival, departure, created,
         spaceNumber: String((i % 42) + 1),
