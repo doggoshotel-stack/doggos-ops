@@ -107,6 +107,7 @@ html, body, #root { width: 100%; height: 100%; }
 .pastilla.outline { background: transparent; border: 1.5px solid ${C.ink}; }
 .pastilla.outline-celeste { background: transparent; border: 1.5px solid ${C.celeste}; color: ${C.celeste}; }
 .pastilla.dark { background: ${C.ink}; color: ${C.amarillo}; }
+.pastilla.brick { background: ${C.brick}; color: ${C.cream}; }
 .pastilla.lg { font-size: 11px; padding: 6px 14px; }
 
 .tile {
@@ -1354,6 +1355,18 @@ function ReservationDetailCard({ r }) {
             fontSize: 12, fontWeight: 700, letterSpacing: '0.04em',
           }}>
             Guardería
+          </span>
+        )}
+        {/d[ií]a\s*(de\s*)?guarder/i.test(r.service || '') && (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center',
+            padding: '4px 10px', borderRadius: 999,
+            background: 'rgba(162, 58, 42, 0.12)',
+            color: C.brick,
+            border: `1px solid ${C.brick}`,
+            fontSize: 12, fontWeight: 700, letterSpacing: '0.04em',
+          }}>
+            Prueba
           </span>
         )}
         <ProductPill label="Transporte" on={hasTransport} />
@@ -3235,6 +3248,7 @@ function GuestRow({ r, time, variant }) {
   const eyebrowIcon = variant === 'arrival' ? '↘' : variant === 'departure' ? '↗' : '●';
   const eyebrowColor = variant === 'arrival' ? C.ink : variant === 'departure' ? C.ocre : C.celeste;
   const breedSize = [r.breed, r.size].filter(Boolean).join(' · ');
+  const isGuarderia = /guarder/i.test(`${r.spaceType || ''} ${r.service || ''}`);
   const clickable = !!r.hubspotId;
   const openFicha = clickable ? () => navigate(`#/clients/${encodeURIComponent(r.hubspotId)}`) : undefined;
   return (
@@ -3265,8 +3279,9 @@ function GuestRow({ r, time, variant }) {
       {breedSize && (
         <span className="eyebrow eyebrow-sm" style={{ opacity: 0.5, marginTop: 1 }}>{breedSize}{r.weight ? ` · ${r.weight} kg` : ''}</span>
       )}
-      {flags.length > 0 && (
+      {(flags.length > 0 || isGuarderia) && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
+          {isGuarderia && <span className="pastilla brick">Prueba</span>}
           {flags.map((f) => (
             <span key={f.type} className={ALERT_STYLES[f.type].pastilla}>
               {ALERT_STYLES[f.type].label}
