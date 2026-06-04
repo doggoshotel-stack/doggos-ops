@@ -19,12 +19,15 @@ const MONTHS_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','
 
 // ---- sample data ----------------------------------------------------------
 const KEYWORDS = [
-  { kw: 'guardería canina ullastrell', pos: 2, prev: 5, vol: 320 },
-  { kw: 'hotel para perros terrassa', pos: 3, prev: 5, vol: 480 },
-  { kw: 'residencia canina vallès', pos: 4, prev: 3, vol: 210 },
-  { kw: 'guardería de día perros', pos: 6, prev: 9, vol: 590 },
-  { kw: 'hotel canino barcelona', pos: 8, prev: 8, vol: 1300 },
-  { kw: 'adiestramiento canino terrassa', pos: 12, prev: 17, vol: 260 },
+  { kw: 'guardería canina ullastrell', pos: 1, prev: 2, vol: 90 },
+  { kw: 'guardería para perros terrassa', pos: 3, prev: 6, vol: 480 },
+  { kw: 'hotel para perros terrassa', pos: 4, prev: 5, vol: 390 },
+  { kw: 'residencia canina vallès', pos: 5, prev: 4, vol: 210 },
+  { kw: 'guardería perros sabadell', pos: 6, prev: 9, vol: 320 },
+  { kw: 'guardería de día para perros', pos: 7, prev: 11, vol: 720 },
+  { kw: 'residència canina terrassa', pos: 8, prev: 8, vol: 170 },
+  { kw: 'hotel canino barcelona', pos: 14, prev: 19, vol: 1300 },
+  { kw: 'dónde dejar el perro en vacaciones', pos: 17, prev: 22, vol: 880 },
 ];
 
 const ADS_BY_MONTH = [
