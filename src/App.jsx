@@ -909,6 +909,13 @@ const NAV_ICON = {
       <path d="M8 17 L8 12 L12 12 L12 17" />
     </svg>
   ),
+  guarderia: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" stroke="none">
+      <circle cx="5.5" cy="6.5" r="1.7" /><circle cx="9.5" cy="4.8" r="1.8" />
+      <circle cx="13.8" cy="6.5" r="1.7" />
+      <path d="M9.7 9 C6.6 9 4.5 11.2 4.5 13.6 C4.5 15.6 6.6 16.6 9.7 16.6 C12.8 16.6 14.9 15.6 14.9 13.6 C14.9 11.2 12.8 9 9.7 9 Z" />
+    </svg>
+  ),
   monthly: (
     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
       <rect x="2.5" y="4.5" width="15" height="13" rx="1" />
@@ -932,6 +939,7 @@ const NAV_ITEMS = [
   { hash: '#/mensual',         label: 'Vista mensual',icon: NAV_ICON.monthly },
   { hash: '#/clients',         label: 'Clientes',     icon: NAV_ICON.clients },
   { hash: '#/transports',      label: 'Transportes',  icon: NAV_ICON.transports },
+  { hash: '#/guarderia',       label: 'Guardería/Prueba', icon: NAV_ICON.guarderia },
   { hash: '#/grooming',        label: 'Peluquería',   icon: NAV_ICON.grooming },
 ];
 
@@ -2226,6 +2234,116 @@ function GroomingJobRow({ job }) {
   );
 }
 
+function GuarderiaView({ merged }) {
+  const isMobile = useIsMobile();
+  const jobs = useMemo(() => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const limit = new Date(today); limit.setDate(limit.getDate() + 7); limit.setHours(23, 59, 59, 999);
+    const out = [];
+    merged.forEach((r) => {
+      const isGuarderia = /guarder/i.test(`${r.spaceType || ''} ${r.service || ''}`);
+      if (!isGuarderia) return;
+      const time = r.arrival || r.departure;
+      if (!time || time < today || time > limit) return;
+      out.push({ time, r });
+    });
+    out.sort((a, b) => a.time.getTime() - b.time.getTime());
+    return out;
+  }, [merged]);
+
+  const byDay = useMemo(() => {
+    const groups = new Map();
+    jobs.forEach((j) => {
+      const k = dateKey(j.time);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(j);
+    });
+    return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [jobs]);
+
+  return (
+    <div>
+      <PageHeader title="Guardería/Prueba" subtitle={`Próximos 7 días · ${jobs.length} ${jobs.length === 1 ? 'servicio' : 'servicios'}`} />
+      {byDay.length === 0 ? (
+        <div style={{ margin: isMobile ? '0 16px 60px' : '0 32px 60px', padding: 28, background: 'rgba(33, 57, 44, 0.04)', borderRadius: 12, color: C.ink, opacity: 0.65, fontSize: 14, textAlign: 'center' }}>
+          Sin guarderías/pruebas programadas en los próximos 7 días.
+        </div>
+      ) : (
+        <div style={{ padding: isMobile ? '0 16px 60px' : '0 32px 60px' }}>
+          {byDay.map(([dKey, dayJobs]) => <GuarderiaDayBlock key={dKey} dKey={dKey} jobs={dayJobs} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GuarderiaDayBlock({ dKey, jobs }) {
+  const date = new Date(dKey + 'T00:00:00');
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  let label;
+  if (date.getTime() === today.getTime()) label = 'Hoy';
+  else if (date.getTime() === tomorrow.getTime()) label = 'Mañana';
+  else label = `${WEEKDAY_ES[date.getDay()]} ${date.getDate()} ${MONTH_ES[date.getMonth()]}`;
+  return (
+    <section style={{ marginBottom: 24 }}>
+      <h3 className="display" style={{ fontSize: 22, color: C.ink, margin: '0 0 10px', textTransform: 'capitalize' }}>{label}</h3>
+      {jobs.map((j, i) => <GuarderiaJobRow key={`${j.r.id}-${i}`} job={j} />)}
+    </section>
+  );
+}
+
+function GuarderiaJobRow({ job }) {
+  const { time, r } = job;
+  const timeStr = `${pad2(time.getHours())}:${pad2(time.getMinutes())}`;
+  const showTime = !(time.getHours() === 0 && time.getMinutes() === 0);
+  const noPhone = !r.phone;
+  return (
+    <div style={{
+      padding: 14, marginBottom: 8,
+      background: C.cream,
+      border: `1px solid rgba(33, 57, 44, 0.12)`,
+      borderLeft: `4px solid ${C.brick}`,
+      borderRadius: 8,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <span className="eyebrow eyebrow-sm" style={{ color: C.brick, fontWeight: 700 }}>Guardería · Prueba</span>
+          <div style={{ marginTop: 3 }}>
+            <span className="display" style={{ fontSize: 20, lineHeight: 1 }}>{r.pet || '—'}</span>
+            <span style={{ marginLeft: 8, fontSize: 13, opacity: 0.7 }}>· {r.guest || '—'}</span>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="pastilla brick">Prueba</span>
+          {showTime && (
+            <span className="display tabular" style={{ fontSize: 22, color: C.ink }}>{timeStr}</span>
+          )}
+        </div>
+      </div>
+      <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.5 }}>
+        <div>
+          <span style={{ opacity: 0.6 }}>Entrada:</span> <strong>{fmtDateTime(r.arrival)}</strong>
+          {r.departure && (
+            <>
+              <span style={{ opacity: 0.6, marginLeft: 12 }}>Salida:</span> <strong>{fmtDateTime(r.departure)}</strong>
+            </>
+          )}
+        </div>
+        {r.spaceType && (
+          <div><span style={{ opacity: 0.6 }}>Habitación:</span> <strong>{r.spaceType}</strong></div>
+        )}
+        <div>
+          <span style={{ opacity: 0.6 }}>Tel:</span>{' '}
+          {noPhone
+            ? <span style={{ opacity: 0.55 }}>—</span>
+            : <strong>{r.phone}</strong>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const route = useRoute();
   const isAdmin = route === '#admin';
@@ -2584,6 +2702,9 @@ export default function App() {
         break;
       case '#/transports':
         routeBody = <TransportsView merged={merged} />;
+        break;
+      case '#/guarderia':
+        routeBody = <GuarderiaView merged={merged} />;
         break;
       case '#/grooming':
         routeBody = <GroomingView merged={merged} />;
