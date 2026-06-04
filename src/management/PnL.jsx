@@ -48,22 +48,23 @@ function daysInMonth(year, month) {
  *  - is_actual (month strictly past = true; current/future = false)
  *  - otb (revenue from bookings with arrival >= today, attributed to their month)
  *
- * What we can't derive yet (no data in current sheet):
- *  - F&B revenue, Extras revenue
+ * What we can't derive yet (no per-product line items in current sheet):
+ *  - Extra-product revenue: Transportes, Late checkout, Guardería, Lavado
  *  - Budget, Variance
  *  - Pickup 7d, vs STLY pace
  * They render as "—".
  */
 export function computePnL(reservations, year, capacity, today = new Date()) {
+  const DAY = 86400000;
   const months = Array.from({ length: 12 }, (_, m) => ({
     month: m,
     rooms_revenue: 0,
-    fb_revenue: null,
-    extras_revenue: null,
     room_nights: 0,
     booking_count: 0,
     otb: 0,
-    budget: null,
+    pickup7: 0,
+    pickup30: 0,
+    bookings: [],          // { created: Date|null, amount } — drives pace/forecast
     is_actual: false,
   }));
 
@@ -80,6 +81,13 @@ export function computePnL(reservations, year, capacity, today = new Date()) {
     months[m].room_nights += nights;
     months[m].booking_count += 1;
     if (r.arrival >= today) months[m].otb += amount;
+    const created = r.created && !isNaN(r.created.getTime()) ? r.created : null;
+    months[m].bookings.push({ created, amount });
+    if (created) {
+      const ageDays = (today - created) / DAY;
+      if (ageDays >= 0 && ageDays <= 7) months[m].pickup7 += amount;
+      if (ageDays >= 0 && ageDays <= 30) months[m].pickup30 += amount;
+    }
   }
 
   for (let m = 0; m < 12; m++) {
@@ -93,13 +101,61 @@ export function computePnL(reservations, year, capacity, today = new Date()) {
     months[m].is_current = m === todayMonth;
   }
 
+  // --- Pace curve + forecast, built entirely from booking-created timestamps ---
+  // Because every booking carries a created date, we can reconstruct what was
+  // on the books `t` days relative to the 1st of any completed month. Averaging
+  // those across completed months gives an expected pace fraction B(t) = the
+  // share of a month's final revenue typically booked by t days before it
+  // starts. Projected close = current OTB / B(t). With history only since
+  // Oct 2025, far-out months lack enough signal and stay unforecast (null).
+  const monthStart = (mi) => new Date(year, mi, 1);
+  const completed = months.filter((mm) => mm.is_actual && mm.rooms_revenue > 0);
+  const paceFraction = (t) => {
+    if (completed.length === 0) return null;
+    let acc = 0;
+    for (const mm of completed) {
+      const cutoff = monthStart(mm.month).getTime() - t * DAY;
+      let onBooks = 0;
+      for (const b of mm.bookings) {
+        if (b.created && b.created.getTime() <= cutoff) onBooks += b.amount;
+      }
+      acc += onBooks / mm.rooms_revenue;
+    }
+    return acc / completed.length;
+  };
+
+  for (let m = 0; m < 12; m++) {
+    const mm = months[m];
+    if (mm.is_actual) {
+      mm.pace = 1;
+      mm.forecast = mm.rooms_revenue;
+      mm.projected = mm.rooms_revenue;
+      continue;
+    }
+    const t = (monthStart(m).getTime() - today.getTime()) / DAY;
+    const f = paceFraction(t);
+    if (f != null && f >= 0.2) {
+      mm.pace = Math.min(1, f);
+      mm.forecast = mm.rooms_revenue / mm.pace;
+    } else {
+      mm.pace = f;
+      mm.forecast = null; // not enough booking history this far out
+    }
+    mm.projected = mm.forecast != null ? mm.forecast : mm.rooms_revenue;
+  }
+
   // FY totals
+  const sum = (sel) => months.reduce((a, b) => a + sel(b), 0);
   const fy = {
-    rooms_revenue: months.reduce((a, b) => a + b.rooms_revenue, 0),
-    room_nights:   months.reduce((a, b) => a + b.room_nights, 0),
-    booking_count: months.reduce((a, b) => a + b.booking_count, 0),
-    otb:           months.reduce((a, b) => a + b.otb, 0),
-    available_nights: months.reduce((a, b) => a + b.available_nights, 0),
+    rooms_revenue: sum((b) => b.rooms_revenue),
+    room_nights:   sum((b) => b.room_nights),
+    booking_count: sum((b) => b.booking_count),
+    otb:           sum((b) => b.otb),
+    pickup7:       sum((b) => b.pickup7),
+    pickup30:      sum((b) => b.pickup30),
+    projected:     sum((b) => b.projected || 0),
+    remaining:     sum((b) => (!b.is_actual && b.forecast != null ? Math.max(0, b.forecast - b.rooms_revenue) : 0)),
+    available_nights: sum((b) => b.available_nights),
   };
   fy.occupancy_pct = fy.available_nights > 0 ? fy.room_nights / fy.available_nights : 0;
   fy.adr = fy.room_nights > 0 ? fy.rooms_revenue / fy.room_nights : 0;
@@ -142,8 +198,10 @@ export default function PnL({ reservations, capacity = 42, now = new Date() }) {
   const rows = [
     { kind: 'section', label: 'Revenue' },
     { kind: 'metric', label: 'Rooms', values: data.months.map(m => fmtEUR(m.rooms_revenue, { compact: true })), fy: fmtEUR(data.fy.rooms_revenue, { compact: true }), accent: true },
-    { kind: 'metric', label: 'F&B',   values: data.months.map(() => '—'), fy: '—', muted: true, note: 'pendiente' },
-    { kind: 'metric', label: 'Extras',values: data.months.map(() => '—'), fy: '—', muted: true, note: 'pendiente' },
+    { kind: 'metric', label: 'Transportes',   values: data.months.map(() => '—'), fy: '—', muted: true, note: 'pendiente' },
+    { kind: 'metric', label: 'Late checkout',  values: data.months.map(() => '—'), fy: '—', muted: true, note: 'pendiente' },
+    { kind: 'metric', label: 'Guardería',      values: data.months.map(() => '—'), fy: '—', muted: true, note: 'pendiente' },
+    { kind: 'metric', label: 'Lavado',         values: data.months.map(() => '—'), fy: '—', muted: true, note: 'pendiente' },
     { kind: 'metric', label: 'Total revenue', values: data.months.map(m => fmtEUR(m.rooms_revenue, { compact: true })), fy: fmtEUR(data.fy.rooms_revenue, { compact: true }), bold: true },
 
     { kind: 'section', label: 'KPIs de ocupación' },
@@ -153,13 +211,13 @@ export default function PnL({ reservations, capacity = 42, now = new Date() }) {
     { kind: 'metric', label: 'RevPAR',      values: data.months.map(m => fmtEUR(m.revpar)), fy: fmtEUR(data.fy.revpar) },
 
     { kind: 'section', label: 'Pickup & pace' },
-    { kind: 'metric', label: 'OTB',          values: data.months.map(m => fmtEUR(m.otb, { compact: true })), fy: fmtEUR(data.fy.otb, { compact: true }) },
-    { kind: 'metric', label: 'Pickup 7d',    values: data.months.map(() => '—'), fy: '—', muted: true, note: 'requiere histórico' },
-    { kind: 'metric', label: 'vs STLY pace', values: data.months.map(() => '—'), fy: '—', muted: true, note: 'requiere LY' },
+    { kind: 'metric', label: 'OTB',        values: data.months.map(m => fmtEUR(m.otb, { compact: true })), fy: fmtEUR(data.fy.otb, { compact: true }) },
+    { kind: 'metric', label: 'Pickup 7d',  values: data.months.map(m => fmtEUR(m.pickup7, { compact: true })), fy: fmtEUR(data.fy.pickup7, { compact: true }) },
+    { kind: 'metric', label: 'Pickup 30d', values: data.months.map(m => fmtEUR(m.pickup30, { compact: true })), fy: fmtEUR(data.fy.pickup30, { compact: true }) },
 
-    { kind: 'section', label: 'Forecast vs actual' },
-    { kind: 'metric', label: 'Budget',   values: data.months.map(() => '—'), fy: '—', muted: true, note: 'input manual' },
-    { kind: 'metric', label: 'Variance', values: data.months.map(() => '—'), fy: '—', muted: true, note: 'depende de budget' },
+    { kind: 'section', label: 'Forecast' },
+    { kind: 'metric', label: 'Forecast cierre (proj.)', values: data.months.map(m => (m.is_actual || m.forecast != null) ? fmtEUR(m.projected, { compact: true }) : '—'), fy: fmtEUR(data.fy.projected, { compact: true }), bold: true },
+    { kind: 'metric', label: 'Pickup restante (proj.)', values: data.months.map(m => (!m.is_actual && m.forecast != null) ? fmtEUR(Math.max(0, m.forecast - m.rooms_revenue), { compact: true }) : '—'), fy: fmtEUR(data.fy.remaining, { compact: true }), note: 'proyección' },
   ];
 
   const currentMonthIdx = now.getFullYear() === year ? now.getMonth() : -1;
@@ -200,7 +258,7 @@ export default function PnL({ reservations, capacity = 42, now = new Date() }) {
       {/* Metric strip */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 24 }}>
         <Metric label="Revenue YTD" value={fmtEUR(data.ytd.rooms_revenue, { compact: true })} />
-        <Metric label="Revenue FY (proj.)" value={fmtEUR(data.fy.rooms_revenue, { compact: true })} />
+        <Metric label="Revenue FY (proj.)" value={fmtEUR(data.fy.projected, { compact: true })} />
         <Metric label="Occupancy FY" value={fmtPct(data.fy.occupancy_pct)} />
         <Metric label="ADR FY" value={fmtEUR(data.fy.adr)} />
         <Metric label="RevPAR FY" value={fmtEUR(data.fy.revpar)} />
@@ -251,8 +309,13 @@ export default function PnL({ reservations, capacity = 42, now = new Date() }) {
       </div>
 
       <div style={{ marginTop: 16, fontSize: 11, opacity: 0.55, letterSpacing: '0.02em', lineHeight: 1.6 }}>
-        Mes en curso destacado en amarillo. Meses futuros en gris (forecast por completar).
-        Pestañas marcadas <em>pendiente</em> / <em>requiere histórico</em> no se calculan todavía con los datos disponibles.
+        Mes en curso destacado en amarillo. Meses futuros en gris.
+        El <strong>forecast</strong> proyecta el cierre de cada mes a partir de la curva de
+        pickup (fecha de creación de cada reserva): reconstruye cómo se llenaron los meses ya
+        cerrados y la aplica al OTB actual. Como abrimos en oct 2025, los meses más lejanos aún
+        no tienen señal suficiente y se muestran como «—». No hay comparativa con el año anterior (STLY).
+        Filas de productos extra (Transportes, Late checkout, Guardería, Lavado) marcadas
+        <em>pendiente</em>: requieren desglose por línea en la exportación de Mews.
       </div>
     </div>
   );
