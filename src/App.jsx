@@ -719,6 +719,35 @@ function buildDemoBridge(now = new Date()) {
   return out;
 }
 
+// Sample Search Console payload (matches search-console.gs output) for demoing
+// the SEO section's real-data view.
+const DEMO_SEO = {
+  ok: true,
+  site: 'sc-domain:doggoshotel.com',
+  range: { start: '2026-05-07', end: '2026-06-01' },
+  summary: { clicks: 1820, impressions: 34200, ctr: 0.0532, position: 6.4 },
+  previous: { clicks: 1610, impressions: 31050, ctr: 0.0519, position: 7.1 },
+  byMonth: [
+    { month: '2026-01', clicks: 920, impressions: 19800 },
+    { month: '2026-02', clicks: 1080, impressions: 22400 },
+    { month: '2026-03', clicks: 1240, impressions: 25100 },
+    { month: '2026-04', clicks: 1390, impressions: 28600 },
+    { month: '2026-05', clicks: 1610, impressions: 31050 },
+    { month: '2026-06', clicks: 1820, impressions: 34200 },
+  ],
+  queries: [
+    { query: 'guardería canina ullastrell', clicks: 210, impressions: 980, ctr: 0.214, position: 1.4 },
+    { query: 'guardería para perros terrassa', clicks: 180, impressions: 2600, ctr: 0.069, position: 3.2 },
+    { query: 'dog daycare barcelona', clicks: 160, impressions: 4100, ctr: 0.039, position: 8.7 },
+    { query: 'hotel para perros terrassa', clicks: 140, impressions: 2200, ctr: 0.063, position: 4.1 },
+    { query: 'residencia canina vallès', clicks: 95, impressions: 1500, ctr: 0.063, position: 5.0 },
+    { query: 'dog boarding barcelona', clicks: 88, impressions: 5200, ctr: 0.017, position: 12.3 },
+    { query: 'guardería perros sabadell', clicks: 72, impressions: 1300, ctr: 0.055, position: 6.2 },
+    { query: 'doggos hotel', clicks: 64, impressions: 210, ctr: 0.305, position: 1.1 },
+  ],
+  updatedAt: new Date().toISOString(),
+};
+
 /* ----------------------- brand SVG motifs ----------------------- */
 
 const PeakTL = ({ height = 70 }) => (
@@ -777,6 +806,8 @@ const DEFAULT_CONFIG = {
   calendlyKey: '',
   bridgeUrl: '',
   bridgeKey: '',
+  seoUrl: '',
+  seoKey: '',
 };
 
 const BRIDGE_VALID_STATUS = new Set(['Checked out', 'Checked in', 'Confirmed', 'Started', 'Processed']);
@@ -2437,7 +2468,8 @@ export default function App() {
   const [calendlyEvents, setCalendlyEvents] = useState([]);
   const [bridgeReservations, setBridgeReservations] = useState([]);
   const [dogExtras, setDogExtras] = useState({});
-  const [fetchErrors, setFetchErrors] = useState({ mews: null, hubspot: null, calendly: null, bridge: null });
+  const [seoData, setSeoData] = useState(null);
+  const [fetchErrors, setFetchErrors] = useState({ mews: null, hubspot: null, calendly: null, bridge: null, seo: null });
 
   /* ---- load config + cache ---- */
   const loadConfig = useCallback(async () => {
@@ -2482,6 +2514,7 @@ export default function App() {
         }));
         setBridgeReservations(bridgeRehydrated);
         if (cache.dogExtras && typeof cache.dogExtras === 'object') setDogExtras(cache.dogExtras);
+        if (cache.seo && typeof cache.seo === 'object') setSeoData(cache.seo);
       }
     } catch {}
   }, []);
@@ -2489,11 +2522,12 @@ export default function App() {
   /* ---- fetch + merge from sources ---- */
   const refresh = useCallback(async (cfg = config) => {
     setRefreshing(true);
-    const errors = { mews: null, hubspot: null, calendly: null, bridge: null };
+    const errors = { mews: null, hubspot: null, calendly: null, bridge: null, seo: null };
     let mewsRows = [];
     let hubspotRows = [];
     let calendlyRows = [];
     let bridgeRows = [];
+    let seoPayload = null;
 
     if (cfg.mewsUrl) {
       try {
@@ -2533,6 +2567,20 @@ export default function App() {
       }
     }
 
+    if (cfg.seoUrl) {
+      try {
+        const url = `${cfg.seoUrl}${cfg.seoUrl.includes('?') ? '&' : '?'}key=${encodeURIComponent(cfg.seoKey || '')}`;
+        const res = await fetch(url, { redirect: 'follow' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data?.error) throw new Error(`Apps Script: ${data.error}`);
+        if (!data?.summary) throw new Error('Respuesta sin summary');
+        seoPayload = data;
+      } catch (e) {
+        errors.seo = e.message;
+      }
+    }
+
     let dogExtrasMap = null;
     if (cfg.hubspotUrl) {
       try {
@@ -2548,11 +2596,12 @@ export default function App() {
     setHubspot(hubspotRows);
     setCalendlyEvents(calendlyRows);
     setBridgeReservations(bridgeRows);
+    if (seoPayload) setSeoData(seoPayload);
     if (dogExtrasMap) setDogExtras(dogExtrasMap);
     setFetchErrors(errors);
 
     // Save to cache for resilience
-    if (mergedRows.length > 0 || pendingRows.length > 0 || hubspotRows.length > 0 || calendlyRows.length > 0 || bridgeRows.length > 0) {
+    if (mergedRows.length > 0 || pendingRows.length > 0 || hubspotRows.length > 0 || calendlyRows.length > 0 || bridgeRows.length > 0 || seoPayload) {
       const cache = {
         merged: mergedRows.map((r) => ({
           ...r,
@@ -2579,6 +2628,7 @@ export default function App() {
           departure: r.departure?.toISOString() || null,
           created: r.created?.toISOString() || null,
         })),
+        seo: seoPayload || seoData,
         dogExtras: dogExtrasMap || dogExtras,
       };
       try {
@@ -2605,7 +2655,7 @@ export default function App() {
   const didInitialFetch = useRef(false);
   useEffect(() => {
     if (loading || didInitialFetch.current) return;
-    if (config.mewsUrl || config.hubspotUrl || config.calendlyUrl || config.bridgeUrl) {
+    if (config.mewsUrl || config.hubspotUrl || config.calendlyUrl || config.bridgeUrl || config.seoUrl) {
       didInitialFetch.current = true;
       refresh(config);
     }
@@ -2668,6 +2718,7 @@ export default function App() {
     })));
     setCalendlyEvents(DEMO_CALENDLY);
     setBridgeReservations(buildDemoBridge());
+    setSeoData(DEMO_SEO);
     const newMeta = { ...meta, lastUpdated: new Date().toISOString() };
     await storage.set(STORAGE_KEYS.meta, JSON.stringify(newMeta), true);
     setMeta(newMeta);
@@ -2678,7 +2729,8 @@ export default function App() {
     setPending([]);
     setCalendlyEvents([]);
     setBridgeReservations([]);
-    setFetchErrors({ mews: null, hubspot: null, calendly: null, bridge: null });
+    setSeoData(null);
+    setFetchErrors({ mews: null, hubspot: null, calendly: null, bridge: null, seo: null });
     await storage.delete(STORAGE_KEYS.cache, true);
   };
 
@@ -2704,6 +2756,7 @@ export default function App() {
           pending={pending}
           calendlyEvents={calendlyEvents}
           bridgeReservations={bridgeReservations}
+          seoData={seoData}
           fetchErrors={fetchErrors}
           refreshing={refreshing}
           onSaveConfig={saveConfig}
@@ -2747,6 +2800,8 @@ export default function App() {
         reservations={bridgeReservations}
         capacity={meta.capacity}
         now={now}
+        seoData={seoData}
+        seoError={fetchErrors.seo}
       />
     );
   } else if (route === '#/clients' || route.startsWith('#/clients/')) {
@@ -3537,7 +3592,7 @@ function Empty({ children }) {
    ADMIN VIEW
    ============================================================ */
 
-function AdminView({ config, meta, merged, pending, calendlyEvents, bridgeReservations, fetchErrors, refreshing, onSaveConfig, onSaveCapacity, onRefresh, onLoadDemo, onClearCache, onSwitchMode }) {
+function AdminView({ config, meta, merged, pending, calendlyEvents, bridgeReservations, seoData, fetchErrors, refreshing, onSaveConfig, onSaveCapacity, onRefresh, onLoadDemo, onClearCache, onSwitchMode }) {
   const [draft, setDraft] = useState(config);
   const [capInput, setCapInput] = useState(meta.capacity);
   const [showScript, setShowScript] = useState(false);
@@ -3619,13 +3674,24 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, bridgeReserv
               onKeyChange={(v) => setDraft({ ...draft, bridgeKey: v })}
               tone="ocre"
             />
+            <SourceField
+              title="SEO · Search Console"
+              eyebrow="Origen 5"
+              status={seoData?.summary ? `${seoData.queries?.length || 0} queries` : 'sin datos'}
+              error={fetchErrors.seo}
+              urlValue={draft.seoUrl}
+              keyValue={draft.seoKey}
+              onUrlChange={(v) => setDraft({ ...draft, seoUrl: v })}
+              onKeyChange={(v) => setDraft({ ...draft, seoKey: v })}
+              tone="celeste"
+            />
           </div>
 
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <button onClick={() => onSaveConfig(draft)} disabled={!dirty} className="btn">
               Guardar configuración
             </button>
-            <button onClick={onRefresh} disabled={refreshing || (!draft.mewsUrl && !draft.hubspotUrl && !draft.calendlyUrl && !draft.bridgeUrl)} className="btn celeste">
+            <button onClick={onRefresh} disabled={refreshing || (!draft.mewsUrl && !draft.hubspotUrl && !draft.calendlyUrl && !draft.bridgeUrl && !draft.seoUrl)} className="btn celeste">
               {refreshing ? 'Actualizando…' : 'Probar / actualizar ahora'}
             </button>
             {dirty && <span className="eyebrow eyebrow-sm" style={{ color: C.brick }}>cambios sin guardar</span>}

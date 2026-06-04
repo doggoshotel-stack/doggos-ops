@@ -1,6 +1,7 @@
 import ManagementLogin, { checkMgmtAuth, clearMgmtAuth } from './Login.jsx';
 import PnL from './PnL.jsx';
 import Customers from './Customers.jsx';
+import Seo from './Seo.jsx';
 
 export { checkMgmtAuth, clearMgmtAuth, ManagementLogin };
 
@@ -14,6 +15,7 @@ const C = {
 const MGMT_ROUTES = [
   { hash: '#/management',          label: 'P&L anual',         comp: 'pnl' },
   { hash: '#/management/customers',label: 'Análisis clientes', comp: 'customers' },
+  { hash: '#/management/seo',      label: 'SEO & Ads',         comp: 'seo' },
   // Pickup & pace / Forecast / Mews sync hidden for now (placeholders). The
   // ManagementRouter still renders them if navigated to directly, so they can
   // be re-enabled by adding their entries back here.
@@ -21,7 +23,7 @@ const MGMT_ROUTES = [
 
 export const MGMT_NAV = MGMT_ROUTES;
 
-export default function ManagementRouter({ route, reservations, capacity, now }) {
+export default function ManagementRouter({ route, reservations, capacity, now, seoData, seoError }) {
   const sub = MGMT_ROUTES.find(r => r.hash === route)?.comp || 'pnl';
 
   if (sub === 'pnl') {
@@ -30,6 +32,10 @@ export default function ManagementRouter({ route, reservations, capacity, now })
 
   if (sub === 'customers') {
     return <Customers reservations={reservations} now={now} />;
+  }
+
+  if (sub === 'seo') {
+    return <Seo data={seoData} error={seoError} />;
   }
 
   // Placeholders for future sections
