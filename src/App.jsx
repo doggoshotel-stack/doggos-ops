@@ -2476,6 +2476,7 @@ export default function App() {
           ...r,
           arrival: r.arrival ? new Date(r.arrival) : null,
           departure: r.departure ? new Date(r.departure) : null,
+          created: r.created ? new Date(r.created) : null,
         }));
         setBridgeReservations(bridgeRehydrated);
         if (cache.dogExtras && typeof cache.dogExtras === 'object') setDogExtras(cache.dogExtras);
@@ -2574,6 +2575,7 @@ export default function App() {
           ...r,
           arrival: r.arrival?.toISOString() || null,
           departure: r.departure?.toISOString() || null,
+          created: r.created?.toISOString() || null,
         })),
         dogExtras: dogExtrasMap || dogExtras,
       };

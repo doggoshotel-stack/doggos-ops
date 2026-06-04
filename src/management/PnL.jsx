@@ -81,7 +81,9 @@ export function computePnL(reservations, year, capacity, today = new Date()) {
     months[m].room_nights += nights;
     months[m].booking_count += 1;
     if (r.arrival >= today) months[m].otb += amount;
-    const created = r.created && !isNaN(r.created.getTime()) ? r.created : null;
+    // created may arrive as a Date (live) or an ISO string (rehydrated cache).
+    const createdDate = r.created == null ? null : (r.created instanceof Date ? r.created : new Date(r.created));
+    const created = createdDate && !isNaN(createdDate.getTime()) ? createdDate : null;
     months[m].bookings.push({ created, amount });
     if (created) {
       const ageDays = (today - created) / DAY;
@@ -101,16 +103,18 @@ export function computePnL(reservations, year, capacity, today = new Date()) {
     months[m].is_current = m === todayMonth;
   }
 
-  // --- Pace curve + forecast, built entirely from booking-created timestamps ---
-  // Because every booking carries a created date, we can reconstruct what was
-  // on the books `t` days relative to the 1st of any completed month. Averaging
-  // those across completed months gives an expected pace fraction B(t) = the
-  // share of a month's final revenue typically booked by t days before it
-  // starts. Projected close = current OTB / B(t). With history only since
-  // Oct 2025, far-out months lack enough signal and stay unforecast (null).
+  // --- Forecast: on-the-books + expected remaining pickup ---
+  // Every booking carries a created date, so for any completed month we can
+  // reconstruct how much was still booked AFTER a given lead point. Averaging
+  // that "remaining pickup" across completed months tells us how much a month
+  // typically still gains from t days out onward. Projected close = what's
+  // already on the books for the month + that expected remaining pickup — so it
+  // always builds on real reservations and never drops below current OTB.
+  // (With history only since Oct 2025, far-out months with little OTB lean
+  // mostly on the closed-month average, so treat them as indicative.)
   const monthStart = (mi) => new Date(year, mi, 1);
   const completed = months.filter((mm) => mm.is_actual && mm.rooms_revenue > 0);
-  const paceFraction = (t) => {
+  const remainingPickup = (t) => {
     if (completed.length === 0) return null;
     let acc = 0;
     for (const mm of completed) {
@@ -119,7 +123,7 @@ export function computePnL(reservations, year, capacity, today = new Date()) {
       for (const b of mm.bookings) {
         if (b.created && b.created.getTime() <= cutoff) onBooks += b.amount;
       }
-      acc += onBooks / mm.rooms_revenue;
+      acc += Math.max(0, mm.rooms_revenue - onBooks);
     }
     return acc / completed.length;
   };
@@ -127,20 +131,13 @@ export function computePnL(reservations, year, capacity, today = new Date()) {
   for (let m = 0; m < 12; m++) {
     const mm = months[m];
     if (mm.is_actual) {
-      mm.pace = 1;
       mm.forecast = mm.rooms_revenue;
       mm.projected = mm.rooms_revenue;
       continue;
     }
     const t = (monthStart(m).getTime() - today.getTime()) / DAY;
-    const f = paceFraction(t);
-    if (f != null && f >= 0.2) {
-      mm.pace = Math.min(1, f);
-      mm.forecast = mm.rooms_revenue / mm.pace;
-    } else {
-      mm.pace = f;
-      mm.forecast = null; // not enough booking history this far out
-    }
+    const extra = remainingPickup(t);
+    mm.forecast = extra != null ? mm.rooms_revenue + extra : null;
     mm.projected = mm.forecast != null ? mm.forecast : mm.rooms_revenue;
   }
 
@@ -310,12 +307,13 @@ export default function PnL({ reservations, capacity = 42, now = new Date() }) {
 
       <div style={{ marginTop: 16, fontSize: 11, opacity: 0.55, letterSpacing: '0.02em', lineHeight: 1.6 }}>
         Mes en curso destacado en amarillo. Meses futuros en gris.
-        El <strong>forecast</strong> proyecta el cierre de cada mes a partir de la curva de
-        pickup (fecha de creación de cada reserva): reconstruye cómo se llenaron los meses ya
-        cerrados y la aplica al OTB actual. Como abrimos en oct 2025, los meses más lejanos aún
-        no tienen señal suficiente y se muestran como «—». No hay comparativa con el año anterior (STLY).
-        Filas de productos extra (Transportes, Late checkout, Guardería, Lavado) marcadas
-        <em>pendiente</em>: requieren desglose por línea en la exportación de Mews.
+        El <strong>forecast</strong> suma a las reservas que ya tiene cada mes (OTB) el pickup que
+        históricamente sigue entrando a partir de este punto del calendario, estimado con la fecha
+        de creación de cada reserva en los meses ya cerrados. Por eso nunca baja del OTB real. Como
+        solo hay histórico desde oct 2025, los meses más lejanos (con poco OTB todavía) se apoyan
+        casi solo en la media de meses cerrados — tómalos como orientativos. No hay comparativa con
+        el año anterior (STLY). Filas de productos extra (Transportes, Late checkout, Guardería,
+        Lavado) marcadas <em>pendiente</em>: requieren desglose por línea en la exportación de Mews.
       </div>
     </div>
   );
