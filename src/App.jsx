@@ -2237,7 +2237,7 @@ function GroomingView({ merged }) {
   const isMobile = useIsMobile();
   const jobs = useMemo(() => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    const limit = new Date(today); limit.setDate(limit.getDate() + 7); limit.setHours(23, 59, 59, 999);
+    const limit = new Date(today); limit.setDate(limit.getDate() + 30); limit.setHours(23, 59, 59, 999);
     const out = [];
     merged.forEach((r) => {
       const items = String(r.products || '')
@@ -2264,10 +2264,10 @@ function GroomingView({ merged }) {
 
   return (
     <div>
-      <PageHeader title="Peluquería" subtitle={`Próximos 7 días · ${jobs.length} ${jobs.length === 1 ? 'servicio' : 'servicios'}`} />
+      <PageHeader title="Peluquería" subtitle={`Próximos 30 días · ${jobs.length} ${jobs.length === 1 ? 'servicio' : 'servicios'}`} />
       {byDay.length === 0 ? (
         <div style={{ margin: isMobile ? '0 16px 60px' : '0 32px 60px', padding: 28, background: 'rgba(33, 57, 44, 0.04)', borderRadius: 12, color: C.ink, opacity: 0.65, fontSize: 14, textAlign: 'center' }}>
-          Sin servicios de peluquería programados en los próximos 7 días.
+          Sin servicios de peluquería programados en los próximos 30 días.
         </div>
       ) : (
         <div style={{ padding: isMobile ? '0 16px 60px' : '0 32px 60px' }}>
@@ -2340,7 +2340,7 @@ function GuarderiaView({ merged }) {
   const isMobile = useIsMobile();
   const jobs = useMemo(() => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    const limit = new Date(today); limit.setDate(limit.getDate() + 7); limit.setHours(23, 59, 59, 999);
+    const limit = new Date(today); limit.setDate(limit.getDate() + 30); limit.setHours(23, 59, 59, 999);
     const out = [];
     merged.forEach((r) => {
       const isGuarderia = /guarder/i.test(`${r.spaceType || ''} ${r.service || ''}`);
@@ -2365,10 +2365,10 @@ function GuarderiaView({ merged }) {
 
   return (
     <div>
-      <PageHeader title="Guardería/Prueba" subtitle={`Próximos 7 días · ${jobs.length} ${jobs.length === 1 ? 'servicio' : 'servicios'}`} />
+      <PageHeader title="Guardería/Prueba" subtitle={`Próximos 30 días · ${jobs.length} ${jobs.length === 1 ? 'servicio' : 'servicios'}`} />
       {byDay.length === 0 ? (
         <div style={{ margin: isMobile ? '0 16px 60px' : '0 32px 60px', padding: 28, background: 'rgba(33, 57, 44, 0.04)', borderRadius: 12, color: C.ink, opacity: 0.65, fontSize: 14, textAlign: 'center' }}>
-          Sin guarderías/pruebas programadas en los próximos 7 días.
+          Sin guarderías/pruebas programadas en los próximos 30 días.
         </div>
       ) : (
         <div style={{ padding: isMobile ? '0 16px 60px' : '0 32px 60px' }}>
