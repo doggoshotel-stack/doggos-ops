@@ -703,6 +703,14 @@ function buildDemoBridge(now = new Date()) {
       if (created > now) continue; // not booked yet — stays out of the books
       // Draw customers from a bounded pool so some repeat (for loyalty analysis).
       const custNo = ((m * 7 + i * 5) % 45) + 1;
+      // Sprinkle transport + late-checkout products so the monthly-view
+      // car / clock icons are demo-visible.
+      const transportMode = (i + m) % 4; // 0: ida, 1: vuelta, 2: both, 3: none
+      const products = [
+        transportMode === 0 || transportMode === 2 ? 'Transporte ida' : '',
+        transportMode === 1 || transportMode === 2 ? 'Transporte vuelta' : '',
+        (i + m) % 3 === 0 ? 'Salida tardía de tu perro' : '',
+      ].filter(Boolean).join(', ');
       out.push({
         number: `BR-${n++}`,
         customer: `Demo Cliente ${String(custNo).padStart(2, '0')}`,
@@ -710,6 +718,7 @@ function buildDemoBridge(now = new Date()) {
         arrival, departure, created,
         spaceNumber: String((i % 42) + 1),
         spaceCategory: 'Estándar',
+        products,
         nights,
         personCount: 1,
         totalAmount: 250 + nights * 32 + (i % 4) * 28,
@@ -867,6 +876,7 @@ function parseBridgeRow(row) {
     created: parseBridgeCreated(row),
     spaceNumber: row['Space number'] != null ? String(row['Space number']) : '',
     spaceCategory: row['Space category'] || '',
+    products: row.Products || '',
     nights: Number(row['Count (days)']) || 0,
     personCount: Number(row['Person count']) || 1,
     totalAmount: parseBridgeAmount(row['Total amount']),
