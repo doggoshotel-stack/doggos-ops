@@ -70,13 +70,18 @@ function tierFor(pct) {
 }
 
 // Mews "Products" column carries transport lines:
-//   "Transporte ida"    → pickup on the arrival date
-//   "Transporte vuelta" → dropoff on the departure date
+//   "Transporte ida"             → pickup on the arrival date
+//   "Transporte vuelta"          → dropoff on the departure date
+//   "Salida tardía de tu perro"  → late checkout on the departure date
 function hasTransportLeg(products, leg) {
   const s = String(products || '');
   if (leg === 'ida') return /transporte\s*ida/i.test(s);
   if (leg === 'vuelta') return /transporte\s*vuelta/i.test(s);
   return false;
+}
+
+function hasLateCheckout(products) {
+  return /salida\s*tard/i.test(String(products || ''));
 }
 
 function CarIcon({ title }) {
@@ -91,6 +96,21 @@ function CarIcon({ title }) {
         <circle cx="7" cy="17" r="2" />
         <circle cx="17" cy="17" r="2" />
         <path d="M9 17h6" />
+      </svg>
+    </span>
+  );
+}
+
+function ClockIcon({ title }) {
+  return (
+    <span
+      title={title}
+      aria-label={title}
+      style={{ display: 'inline-flex', color: C.ink, opacity: 0.75, flexShrink: 0 }}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3.5 2" />
       </svg>
     </span>
   );
@@ -457,6 +477,7 @@ function DayDetailModal({ day, reservations, onClose }) {
             items={departures}
             timeKey="departure"
             transportLeg="vuelta"
+            showLateCheckout
           />
           <DaySection
             title="En casa"
@@ -474,7 +495,7 @@ function DayDetailModal({ day, reservations, onClose }) {
   );
 }
 
-function DaySection({ title, count, pillBg, pillFg = C.ink, arrow, items, timeKey, formatRight, transportLeg }) {
+function DaySection({ title, count, pillBg, pillFg = C.ink, arrow, items, timeKey, formatRight, transportLeg, showLateCheckout }) {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
@@ -493,6 +514,7 @@ function DaySection({ title, count, pillBg, pillFg = C.ink, arrow, items, timeKe
             const spaceLabel = [r.spaceCategory, r.spaceNumber].filter(Boolean).join(' · ');
             const showCar = transportLeg && hasTransportLeg(r.products, transportLeg);
             const carTitle = transportLeg === 'ida' ? 'Transporte ida · recogida' : 'Transporte vuelta · entrega';
+            const showClock = showLateCheckout && hasLateCheckout(r.products);
             return (
               <div
                 key={`${r.number}-${timeKey}`}
@@ -507,6 +529,7 @@ function DaySection({ title, count, pillBg, pillFg = C.ink, arrow, items, timeKe
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 14 }}>
                     {r.customer || `Reserva #${r.number}`}
                     {showCar && <CarIcon title={carTitle} />}
+                    {showClock && <ClockIcon title="Salida tardía · late checkout" />}
                   </span>
                   <span className="tabular" style={{ fontSize: 12, opacity: 0.65 }}>{time}</span>
                 </div>
