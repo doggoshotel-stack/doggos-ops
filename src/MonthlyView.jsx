@@ -69,6 +69,33 @@ function tierFor(pct) {
   return TIER_COLORS[TIER_COLORS.length - 1];
 }
 
+// Mews "Products" column carries transport lines:
+//   "Transporte ida"    → pickup on the arrival date
+//   "Transporte vuelta" → dropoff on the departure date
+function hasTransportLeg(products, leg) {
+  const s = String(products || '');
+  if (leg === 'ida') return /transporte\s*ida/i.test(s);
+  if (leg === 'vuelta') return /transporte\s*vuelta/i.test(s);
+  return false;
+}
+
+function CarIcon({ title }) {
+  return (
+    <span
+      title={title}
+      aria-label={title}
+      style={{ display: 'inline-flex', color: C.ocre, flexShrink: 0 }}
+    >
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2" />
+        <circle cx="7" cy="17" r="2" />
+        <circle cx="17" cy="17" r="2" />
+        <path d="M9 17h6" />
+      </svg>
+    </span>
+  );
+}
+
 export default function MonthlyView({ reservations = [], capacity = 42, now = new Date(), error, configured }) {
   const [cursor, setCursor] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
   const [selectedDay, setSelectedDay] = useState(null);
@@ -420,6 +447,7 @@ function DayDetailModal({ day, reservations, onClose }) {
             arrow="↓"
             items={arrivals}
             timeKey="arrival"
+            transportLeg="ida"
           />
           <DaySection
             title="Salidas"
@@ -428,6 +456,7 @@ function DayDetailModal({ day, reservations, onClose }) {
             arrow="↑"
             items={departures}
             timeKey="departure"
+            transportLeg="vuelta"
           />
           <DaySection
             title="En casa"
@@ -445,7 +474,7 @@ function DayDetailModal({ day, reservations, onClose }) {
   );
 }
 
-function DaySection({ title, count, pillBg, pillFg = C.ink, arrow, items, timeKey, formatRight }) {
+function DaySection({ title, count, pillBg, pillFg = C.ink, arrow, items, timeKey, formatRight, transportLeg }) {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
@@ -462,6 +491,8 @@ function DaySection({ title, count, pillBg, pillFg = C.ink, arrow, items, timeKe
             const t = r[timeKey];
             const time = formatRight ? formatRight(r) : t.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
             const spaceLabel = [r.spaceCategory, r.spaceNumber].filter(Boolean).join(' · ');
+            const showCar = transportLeg && hasTransportLeg(r.products, transportLeg);
+            const carTitle = transportLeg === 'ida' ? 'Transporte ida · recogida' : 'Transporte vuelta · entrega';
             return (
               <div
                 key={`${r.number}-${timeKey}`}
@@ -473,7 +504,10 @@ function DaySection({ title, count, pillBg, pillFg = C.ink, arrow, items, timeKe
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-                  <span style={{ fontWeight: 700, fontSize: 14 }}>{r.customer || `Reserva #${r.number}`}</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 14 }}>
+                    {r.customer || `Reserva #${r.number}`}
+                    {showCar && <CarIcon title={carTitle} />}
+                  </span>
                   <span className="tabular" style={{ fontSize: 12, opacity: 0.65 }}>{time}</span>
                 </div>
                 {(spaceLabel || r.nights) && (
