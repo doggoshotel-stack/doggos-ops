@@ -73,7 +73,10 @@ function tierFor(pct) {
 //   "Transporte ida"             → pickup on the arrival date
 //   "Transporte vuelta"          → dropoff on the departure date
 //   "Salida tardía de tu perro"  → late checkout on the departure date
-function hasTransportLeg(products, leg) {
+// The rate name (column AF) can also bundle transport, e.g.
+//   "Día de Guardería - Con Transporte" → pickup AND dropoff (single-day daycare).
+function hasTransportLeg(products, leg, rateName) {
+  if (/\bcon\s*transporte\b/i.test(String(rateName || ''))) return true;
   const s = String(products || '');
   if (leg === 'ida') return /transporte\s*ida/i.test(s);
   if (leg === 'vuelta') return /transporte\s*vuelta/i.test(s);
@@ -512,7 +515,7 @@ function DaySection({ title, count, pillBg, pillFg = C.ink, arrow, items, timeKe
             const t = r[timeKey];
             const time = formatRight ? formatRight(r) : t.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
             const spaceLabel = [r.spaceCategory, r.spaceNumber].filter(Boolean).join(' · ');
-            const showCar = transportLeg && hasTransportLeg(r.products, transportLeg);
+            const showCar = transportLeg && hasTransportLeg(r.products, transportLeg, r.rateName);
             const carTitle = transportLeg === 'ida' ? 'Transporte ida · recogida' : 'Transporte vuelta · entrega';
             const showClock = showLateCheckout && hasLateCheckout(r.products);
             return (

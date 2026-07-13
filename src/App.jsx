@@ -280,6 +280,26 @@ const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
 
 /* ----------------------- row parsers ----------------------- */
 
+// Mews rate name (column AF, e.g. "Día de Guardería - Con Transporte").
+// Rates are suffixed "- Con Transporte" (we pick up / drop off the dog) or
+// "- Sin Transporte" (owner handles it). Header varies across exports, so we
+// try the known names, then fall back to any value shaped like that rate label.
+const RATE_HEADERS = ['Rate', 'Rate name', 'Rate Name', 'Tarifa', 'Nombre de tarifa', 'Nombre de la tarifa'];
+function pickRateName(row) {
+  for (const k of RATE_HEADERS) {
+    if (row[k] != null && String(row[k]).trim() !== '') return String(row[k]).trim();
+  }
+  for (const v of Object.values(row)) {
+    // Dash-anchored so free-text notes ("viene con transporte propio") don't match.
+    if (typeof v === 'string' && /-\s*(con|sin)\s*transporte\b/i.test(v)) return v.trim();
+  }
+  return '';
+}
+// "Con Transporte" = needs transport; "Sin Transporte" = does not.
+function rateNeedsTransport(rateName) {
+  return /\bcon\s*transporte\b/i.test(String(rateName || ''));
+}
+
 function parseMewsRow(row, idx) {
   return {
     source: 'mews',
@@ -291,6 +311,7 @@ function parseMewsRow(row, idx) {
     departure: parseDate(row.end_datetime),
     service: row.service || '',
     spaceType: row.requested_category || '',
+    rateName: pickRateName(row),
     rate: parseNumber(row.rate),
     amount: parseNumber(row.total_amount),
     notes: row.notes || '',
@@ -623,7 +644,7 @@ function buildDemoRow(opts) {
     service: opts.service || 'Hotel', spaceType: opts.spaceType || 'Suite estándar',
     rate: opts.rate || 58, amount: opts.amount || 290,
     notes: opts.notes || '', origin: 'web',
-    products: opts.products || '', personCount: 1, enterprise: 'doggos',
+    products: opts.products || '', rateName: opts.rateName || '', personCount: 1, enterprise: 'doggos',
     pet: opts.pet || '', breed: opts.breed || '', size: opts.size || '',
     weight: opts.weight || '',
     transport: opts.transport || false,
@@ -668,6 +689,9 @@ const DEMO_DATA = [
   buildDemoRow({ id: 'AAA-1048', guest: 'Pujol Riera', pet: 'Kira', breed: 'Akita', size: 'Grande', weight: '29', arrival: offsetDate(1, 10), departure: offsetDate(6, 11), rate: 58, amount: 290 }),
   buildDemoRow({ id: 'AAA-1049', guest: 'Serra Boix', pet: 'Boby', breed: 'Yorkshire', size: 'Pequeño', weight: '4', arrival: offsetDate(1, 14), departure: offsetDate(4, 11), rate: 58, amount: 174 }),
   buildDemoRow({ id: 'AAA-1050', guest: 'Camps Oliva', pet: 'Duna', breed: 'Galgo', size: 'Grande', weight: '24', arrival: offsetDate(2, 10), departure: offsetDate(9, 11), rate: 58, amount: 406, notes: 'Recientemente adoptado. Miedo a ruidos fuertes.', rituals: 'Necesita un espacio tranquilo, lejos de zonas de juego.' }),
+
+  // Daycare with transport — rate name carries "Con Transporte" (no product lines).
+  buildDemoRow({ id: 'AAA-1051', guest: 'Blanco Serra', email: 'blanco@example.com', pet: 'Nube', breed: 'Border Collie', size: 'Mediano', weight: '15', arrival: offsetDate(1, 9), departure: offsetDate(1, 18), rate: 32, amount: 32, service: 'Guardería', spaceType: 'Guardería', rateName: 'Día de Guardería - Con Transporte', notes: 'Guardería con recogida y entrega.' }),
 ];
 
 const DEMO_PENDING = 2; // pretend 2 HubSpot intakes without Mews bookings
@@ -724,6 +748,26 @@ function buildDemoBridge(now = new Date()) {
         totalAmount: 250 + nights * 32 + (i % 4) * 28,
       });
     }
+  }
+  // Single-day daycare rows whose rate bundles transport (no product lines) —
+  // makes the monthly-view car icon visible for the "Con Transporte" case.
+  for (let d = 0; d < 3; d++) {
+    const day = Math.min(28, now.getDate() + d);
+    const arrival = new Date(now.getFullYear(), now.getMonth(), day, 9, 0, 0);
+    const departure = new Date(now.getFullYear(), now.getMonth(), day, 18, 0, 0);
+    out.push({
+      number: `BR-DC-${d + 1}`,
+      customer: `Guardería Demo ${d + 1}`,
+      status: 'Confirmed',
+      arrival, departure, created: new Date(now.getTime()),
+      spaceNumber: '',
+      spaceCategory: 'Guardería',
+      products: '',
+      rateName: 'Día de Guardería - Con Transporte',
+      nights: 0,
+      personCount: 1,
+      totalAmount: 32,
+    });
   }
   return out;
 }
@@ -877,6 +921,7 @@ function parseBridgeRow(row) {
     spaceNumber: row['Space number'] != null ? String(row['Space number']) : '',
     spaceCategory: row['Space category'] || '',
     products: row.Products || '',
+    rateName: pickRateName(row),
     nights: Number(row['Count (days)']) || 0,
     personCount: Number(row['Person count']) || 1,
     totalAmount: parseBridgeAmount(row['Total amount']),
@@ -2122,8 +2167,11 @@ function TransportsView({ merged }) {
     const out = [];
     merged.forEach((r) => {
       const products = String(r.products || '');
-      const hasIda = /transporte\s*ida/i.test(products);
-      const hasVuelta = /transporte\s*vuelta/i.test(products);
+      // "Con Transporte" rates (e.g. daycare) imply both pickup and dropoff,
+      // even when no explicit "Transporte ida/vuelta" product line exists.
+      const needsTransport = rateNeedsTransport(r.rateName);
+      const hasIda = /transporte\s*ida/i.test(products) || needsTransport;
+      const hasVuelta = /transporte\s*vuelta/i.test(products) || needsTransport;
       const hasTardia = /salida\s*tard/i.test(products);
       if (hasIda && r.arrival && r.arrival >= today && r.arrival <= limit) {
         out.push({ kind: 'ida', time: r.arrival, r });
