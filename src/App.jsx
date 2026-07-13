@@ -626,6 +626,42 @@ async function saveDogExtras(url, key, dogId, { comments, photo }) {
   return data;
 }
 
+// The ops room board lives in the `room_board` tab of the HubSpot sheet, served
+// by the same proxy. Keyed by Mews confirmation number.
+async function fetchRoomBoard(url, key) {
+  const rows = await fetchSheet(`${url}${url.includes('?') ? '&' : '?'}sheet=room_board`, key);
+  const map = {};
+  for (const row of rows) {
+    const id = row.reservation != null ? String(row.reservation).trim() : '';
+    if (!id) continue;
+    map[id] = {
+      room: row.room != null ? String(row.room).trim() : '',
+      feed_9: row.feed_9 != null ? String(row.feed_9) : '',
+      feed_14: row.feed_14 != null ? String(row.feed_14) : '',
+      feed_20: row.feed_20 != null ? String(row.feed_20) : '',
+      med_note: row.med_note != null ? String(row.med_note) : '',
+      updatedAt: row.updated_at || '',
+    };
+  }
+  return map;
+}
+
+// Partial upsert — send only the fields that changed ({room} on a move,
+// {feed_9} on a feed edit). Fire-and-forget; next refresh reconciles.
+async function saveRoomBoard(url, key, reservation, patch) {
+  if (!url || !reservation) throw new Error('Falta URL o reservation');
+  const res = await fetch(url, {
+    method: 'POST',
+    redirect: 'follow',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ key: key || '', action: 'saveRoomBoard', reservation, ...patch }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  if (data && data.error) throw new Error(`Apps Script: ${data.error}`);
+  return data;
+}
+
 /* ----------------------- demo data ----------------------- */
 
 const offsetDate = (days, hours = 12, minutes = 0) => {
@@ -653,6 +689,7 @@ function buildDemoRow(opts) {
     medications: opts.medications || [],
     medicalNotes: opts.medicalNotes || '',
     foodBrand: opts.foodBrand || '', foodAmount: opts.foodAmount || '',
+    foodFrequency: opts.foodFrequency || '',
     prohibitedFoods: opts.prohibitedFoods || '',
     rituals: opts.rituals || '',
     vetClinic: opts.vetClinic || '', vetPhone: opts.vetPhone || '',
@@ -676,13 +713,13 @@ const DEMO_DATA = [
   buildDemoRow({ id: 'AAA-1033', guest: 'Casas Verdú', email: 'casas@example.com', pet: 'Hugo', breed: 'Setter', size: 'Grande', weight: '22', arrival: offsetDate(-7, 16), departure: offsetDate(0, 17), rate: 67, amount: 469 }),
 
   // In-house (continuing)
-  buildDemoRow({ id: 'AAA-1034', guest: 'Mendoza Coll', pet: 'Nala', breed: 'Husky', size: 'Grande', weight: '24', arrival: offsetDate(-2, 10), departure: offsetDate(2, 11), rate: 58, amount: 232 }),
-  buildDemoRow({ id: 'AAA-1035', guest: 'Torres Riba', pet: 'Simba', breed: 'Border Collie', size: 'Mediano', weight: '18', arrival: offsetDate(-4, 11), departure: offsetDate(1, 11), rate: 58, amount: 290, notes: 'Mucha energía. Sesión de juego extra.' }),
+  buildDemoRow({ id: 'AAA-1034', guest: 'Mendoza Coll', pet: 'Nala', breed: 'Husky', size: 'Grande', weight: '24', arrival: offsetDate(-2, 10), departure: offsetDate(2, 11), rate: 58, amount: 232, foodBrand: 'Acana', foodAmount: '600', foodFrequency: '2' }),
+  buildDemoRow({ id: 'AAA-1035', guest: 'Torres Riba', pet: 'Simba', breed: 'Border Collie', size: 'Mediano', weight: '18', arrival: offsetDate(-4, 11), departure: offsetDate(1, 11), rate: 58, amount: 290, notes: 'Mucha energía. Sesión de juego extra.', foodAmount: '450', foodFrequency: '3' }),
   buildDemoRow({ id: 'AAA-1036', guest: 'Navarro Pla', pet: 'Lola', breed: 'Carlino', size: 'Pequeño', weight: '8', arrival: offsetDate(-1, 9), departure: offsetDate(6, 11), rate: 58, amount: 406, pathologies: ['Síndrome braquicefálico'], notes: 'Cuidado con el calor.' }),
   buildDemoRow({ id: 'AAA-1037', guest: 'Esteve Roig', pet: 'Thor', breed: 'Mastín', size: 'Gigante', weight: '52', arrival: offsetDate(-3, 10), departure: offsetDate(4, 11), rate: 75, amount: 525, spaceType: 'Suite XL' }),
   buildDemoRow({ id: 'AAA-1038', guest: 'Font Sabaté', pet: 'Maya', breed: 'Mestiza', size: 'Pequeño', weight: '6', arrival: offsetDate(-2, 14), departure: offsetDate(3, 11), rate: 58, amount: 290, notes: 'Ansiedad por separación.', rituals: 'Le calma una mantita azul que aporta el dueño.' }),
   buildDemoRow({ id: 'AAA-1039', guest: 'Bosch Ferrer', pet: 'Olivia', breed: 'Labrador', size: 'Grande', weight: '27', arrival: offsetDate(-5, 16), departure: offsetDate(2, 11), rate: 58, amount: 406, notes: 'VIP, viene cada mes.' }),
-  buildDemoRow({ id: 'AAA-1040', guest: 'Ribas Camps', pet: 'Zeus', breed: 'Dóberman', size: 'Grande', weight: '36', arrival: offsetDate(-1, 11), departure: offsetDate(8, 11), rate: 58, amount: 522, medications: [{ name: 'Cosequin DS', dose: '1 cápsula', schedule: 'con la cena' }], pathologies: ['Displasia de cadera'] }),
+  buildDemoRow({ id: 'AAA-1040', guest: 'Ribas Camps', pet: 'Zeus', breed: 'Dóberman', size: 'Grande', weight: '36', arrival: offsetDate(-1, 11), departure: offsetDate(8, 11), rate: 58, amount: 522, medications: [{ name: 'Cosequin DS', dose: '1 cápsula', schedule: 'con la cena' }], pathologies: ['Displasia de cadera'], foodAmount: '400', foodFrequency: '2' }),
   buildDemoRow({ id: 'AAA-1041', guest: 'Vives Pons', pet: 'Pepa', breed: 'Schnauzer', size: 'Mediano', weight: '11', arrival: offsetDate(-2, 9), departure: offsetDate(5, 11), rate: 58, amount: 406 }),
 
   // Future
@@ -693,6 +730,15 @@ const DEMO_DATA = [
   // Daycare with transport — rate name carries "Con Transporte" (no product lines).
   buildDemoRow({ id: 'AAA-1051', guest: 'Blanco Serra', email: 'blanco@example.com', pet: 'Nube', breed: 'Border Collie', size: 'Mediano', weight: '15', arrival: offsetDate(1, 9), departure: offsetDate(1, 18), rate: 32, amount: 32, service: 'Guardería', spaceType: 'Guardería', rateName: 'Día de Guardería - Con Transporte', notes: 'Guardería con recogida y entrega.' }),
 ];
+
+// A few dogs pre-placed on the board (keyed by confirmation number), the rest
+// land in the "Sin asignar" tray. AAA-1034 has a feed override on the 9h slot.
+const DEMO_ROOM_BOARD = {
+  'AAA-1034': { room: '3', feed_9: '350', feed_14: '', feed_20: '', med_note: '', updatedAt: '' },
+  'AAA-1035': { room: '3', feed_9: '', feed_14: '', feed_20: '', med_note: '', updatedAt: '' }, // sibling sharing room 3
+  'AAA-1040': { room: 'B', feed_9: '', feed_14: '', feed_20: '', med_note: '', updatedAt: '' },
+  'AAA-1037': { room: 'F', feed_9: '', feed_14: '', feed_20: '', med_note: '', updatedAt: '' },
+};
 
 const DEMO_PENDING = 2; // pretend 2 HubSpot intakes without Mews bookings
 
@@ -1080,6 +1126,12 @@ const NAV_ICON = {
       <path d="M6.5 2.5 L6.5 5.5 M13.5 2.5 L13.5 5.5" />
     </svg>
   ),
+  rooms: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+      <rect x="2.5" y="2.5" width="6.5" height="15" rx="1" /><rect x="11" y="2.5" width="6.5" height="15" rx="1" />
+      <circle cx="7" cy="10" r="0.9" fill="currentColor" stroke="none" /><circle cx="13" cy="10" r="0.9" fill="currentColor" stroke="none" />
+    </svg>
+  ),
   chevronLeft: (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 3 L4 8 L10 13" /></svg>
   ),
@@ -1093,6 +1145,7 @@ const NAV_ITEMS = [
   { hash: '#/arrivals/today',  label: 'Llegadas hoy', icon: NAV_ICON.arrivals },
   { hash: '#/departures/today',label: 'Salidas hoy',  icon: NAV_ICON.departures },
   { hash: '#/inhouse',         label: 'In-House',     icon: NAV_ICON.inhouse },
+  { hash: '#/habitaciones',    label: 'Habitaciones', icon: NAV_ICON.rooms },
   { hash: '#/mensual',         label: 'Vista mensual',icon: NAV_ICON.monthly },
   { hash: '#/clients',         label: 'Clientes',     icon: NAV_ICON.clients },
   { hash: '#/transports',      label: 'Transportes',  icon: NAV_ICON.transports },
@@ -2504,6 +2557,300 @@ function GuarderiaJobRow({ job }) {
   );
 }
 
+/* ----------------------- rooms board (Habitaciones) ----------------------- */
+
+// The building: two wings of 21 rooms each. Norte is numbered 1–21, Sur is
+// lettered A–U. A room can hold more than one dog (siblings sharing).
+const NORTE_ROOMS = Array.from({ length: 21 }, (_, i) => String(i + 1));
+const SUR_ROOMS = Array.from({ length: 21 }, (_, i) => String.fromCharCode(65 + i)); // A..U
+const ALL_ROOMS = [...NORTE_ROOMS, ...SUR_ROOMS];
+const FEED_SLOTS = [
+  { key: 'feed_9', label: '9h' },
+  { key: 'feed_14', label: '14h' },
+  { key: 'feed_20', label: '20h' },
+];
+
+function roomNum_(v) {
+  const n = parseFloat(String(v == null ? '' : v).replace(',', '.').replace(/[^0-9.]/g, ''));
+  return isNaN(n) ? 0 : n;
+}
+
+// Effective grams per feeding slot: HubSpot default (AP total ÷ AQ frequency,
+// morning-first) unless staff overrode that slot on the board. '' = no meal.
+function effectiveFeeding(r, ov) {
+  ov = ov || {};
+  const amount = roomNum_(r.foodAmount);
+  const freq = Math.round(roomNum_(r.foodFrequency));
+  const per = freq > 0 ? String(Math.round(amount / freq)) : '';
+  const def = { feed_9: '', feed_14: '', feed_20: '' };
+  if (freq === 1) def.feed_9 = per;
+  else if (freq === 2) { def.feed_9 = per; def.feed_20 = per; }
+  else if (freq >= 3) { def.feed_9 = per; def.feed_14 = per; def.feed_20 = per; }
+  const pick = (k) => (ov[k] != null && String(ov[k]).trim() !== '' ? String(ov[k]).trim() : def[k]);
+  return { feed_9: pick('feed_9'), feed_14: pick('feed_14'), feed_20: pick('feed_20') };
+}
+
+function shortDate_(d) {
+  return d && !isNaN(d.getTime()) ? `${d.getDate()}/${d.getMonth() + 1}` : '—';
+}
+
+function FeedSlot({ label, value, isDefault, onCommit, setInteracting }) {
+  const [v, setV] = useState(value == null ? '' : String(value));
+  useEffect(() => { setV(value == null ? '' : String(value)); }, [value]);
+  const commit = () => {
+    setInteracting(false);
+    if (String(value == null ? '' : value) !== v) onCommit(v.trim());
+  };
+  return (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11 }} onClick={(e) => e.stopPropagation()}>
+      <span style={{ opacity: 0.55, fontWeight: 700 }}>{label}</span>
+      <input
+        value={v}
+        onChange={(e) => setV(e.target.value.replace(/[^0-9]/g, ''))}
+        onFocus={() => setInteracting(true)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+        placeholder="—"
+        inputMode="numeric"
+        title={isDefault ? 'Ración por defecto (HubSpot). Edita para ajustar.' : 'Ración ajustada'}
+        style={{
+          width: 30, textAlign: 'center', fontSize: 11, padding: '2px 1px',
+          border: `1px solid ${C.ink15}`, borderRadius: 5, background: C.cream,
+          color: v ? C.ink : 'transparent', fontStyle: isDefault ? 'italic' : 'normal',
+        }}
+      />
+      <span style={{ opacity: 0.4 }}>g</span>
+    </label>
+  );
+}
+
+function RoomDogCard({ dog, ov, selected, placed, onTap, onUnassign, onSaveFeed, setInteracting, onDragStart, onDragEnd }) {
+  const feeding = effectiveFeeding(dog, ov);
+  const isDefault = !(ov && (ov.feed_9 || ov.feed_14 || ov.feed_20));
+  const meds = dog.medications || [];
+  const hasMed = meds.length > 0 || (ov && ov.med_note);
+  const medText = meds.map((m) => [m.name, m.dose].filter(Boolean).join(' · ')).filter(Boolean).join(' | ');
+  return (
+    <div
+      draggable
+      onDragStart={(e) => { onDragStart(); try { e.dataTransfer.setData('text/plain', dog._key); e.dataTransfer.effectAllowed = 'move'; } catch {} }}
+      onDragEnd={onDragEnd}
+      style={{
+        border: selected ? `2px solid ${C.ink}` : `1px solid ${C.ink15}`,
+        background: selected ? 'rgba(245,245,61,0.35)' : 'rgba(255,255,255,0.6)',
+        borderRadius: 8, padding: '6px 8px', cursor: 'grab',
+        boxShadow: selected ? '0 2px 8px rgba(33,57,44,0.18)' : 'none',
+      }}
+    >
+      <div onClick={(e) => { e.stopPropagation(); onTap(); }} style={{ cursor: 'pointer' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span className="display" style={{ fontSize: 15, lineHeight: 1.1 }}>{dog.pet || dog.guest || '—'}</span>
+          {hasMed && <span title={medText || 'Medicación'} style={{ fontSize: 11 }}>💊</span>}
+        </div>
+        <div style={{ fontSize: 11, opacity: 0.65 }}>
+          {dog.guest || '—'} · {shortDate_(dog.arrival)}→{shortDate_(dog.departure)}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 5, flexWrap: 'wrap' }}>
+        {FEED_SLOTS.map((s) => (
+          <FeedSlot
+            key={s.key}
+            label={s.label}
+            value={feeding[s.key]}
+            isDefault={isDefault}
+            onCommit={(val) => onSaveFeed(s.key, val)}
+            setInteracting={setInteracting}
+          />
+        ))}
+      </div>
+      {medText && <div style={{ fontSize: 10.5, marginTop: 4, color: C.brick, lineHeight: 1.35 }}>{medText}</div>}
+      {placed && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onUnassign(); }}
+          style={{ marginTop: 5, fontSize: 10, border: 'none', background: 'transparent', color: C.ink, opacity: 0.5, cursor: 'pointer', padding: 0 }}
+        >
+          ✕ sacar
+        </button>
+      )}
+    </div>
+  );
+}
+
+function RoomCell({ room, dogs, selectionActive, onRoomTap, onDrop, renderDog }) {
+  const [over, setOver] = useState(false);
+  const empty = dogs.length === 0;
+  return (
+    <div
+      onClick={() => onRoomTap(room)}
+      onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => { e.preventDefault(); setOver(false); onDrop(room); }}
+      style={{
+        display: 'flex', gap: 8, alignItems: 'stretch',
+        border: `1px solid ${over ? C.ink : C.ink15}`,
+        background: over ? 'rgba(120,217,216,0.25)' : (empty ? 'transparent' : 'rgba(33,57,44,0.03)'),
+        borderRadius: 8, padding: 6, minHeight: 46,
+        cursor: selectionActive ? 'pointer' : 'default',
+        borderStyle: empty ? 'dashed' : 'solid',
+      }}
+    >
+      <div style={{ width: 26, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span className="display tabular" style={{ fontSize: 15, opacity: empty ? 0.4 : 0.85 }}>{room}</span>
+      </div>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {empty
+          ? <span style={{ fontSize: 11, opacity: 0.35, alignSelf: 'center', fontStyle: 'italic' }}>{selectionActive ? 'colocar aquí' : 'libre'}</span>
+          : dogs.map(renderDog)}
+      </div>
+    </div>
+  );
+}
+
+function RoomColumn({ title, rooms, byRoom, selectionActive, onRoomTap, onDrop, renderDog }) {
+  const occupied = rooms.filter((room) => (byRoom[room] || []).length > 0).length;
+  return (
+    <div style={{ flex: 1, minWidth: 260 }}>
+      <div className="eyebrow eyebrow-sm" style={{ opacity: 0.7, marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+        <span>{title}</span>
+        <span style={{ opacity: 0.7 }}>{occupied}/{rooms.length}</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {rooms.map((room) => (
+          <RoomCell
+            key={room}
+            room={room}
+            dogs={byRoom[room] || []}
+            selectionActive={selectionActive}
+            onRoomTap={onRoomTap}
+            onDrop={onDrop}
+            renderDog={renderDog}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RoomsView({ merged, roomBoard, onSaveRoom, onInteractingChange }) {
+  const isMobile = useIsMobile();
+  const [selected, setSelected] = useState(null);
+  const [dragId, setDragId] = useState(null);
+  const board = roomBoard || {};
+
+  const setInteracting = (v) => { if (onInteractingChange) onInteractingChange(v); };
+
+  // Dogs physically present today: in-house + today's arrivals/departures/daycare.
+  const dogs = useMemo(() => {
+    const t = new Date();
+    const start = new Date(t); start.setHours(0, 0, 0, 0);
+    const end = new Date(t); end.setHours(23, 59, 59, 999);
+    return merged
+      .filter((r) => r.arrival && r.departure && r.arrival <= end && r.departure >= start)
+      .map((r) => ({ ...r, _key: String(r.confirmation || r.id || '') }))
+      .filter((r) => r._key)
+      .sort((a, b) => (a.pet || '').localeCompare(b.pet || ''));
+  }, [merged]);
+
+  const { byRoom, unplaced } = useMemo(() => {
+    const map = {};
+    const un = [];
+    for (const d of dogs) {
+      const room = String(board[d._key]?.room || '').trim();
+      if (room && ALL_ROOMS.includes(room)) (map[room] = map[room] || []).push(d);
+      else un.push(d);
+    }
+    return { byRoom: map, unplaced: un };
+  }, [dogs, board]);
+
+  const move = (reservation, room) => {
+    if (!reservation) return;
+    onSaveRoom(reservation, { room: room || '' });
+    setSelected(null);
+    setDragId(null);
+    setInteracting(false);
+  };
+  const saveFeed = (reservation, slot, val) => onSaveRoom(reservation, { [slot]: val });
+
+  const onDrop = (room) => { if (dragId) move(dragId, room); };
+  const onRoomTap = (room) => { if (selected) move(selected, room); };
+
+  const renderDog = (dog) => (
+    <RoomDogCard
+      key={dog._key}
+      dog={dog}
+      ov={board[dog._key]}
+      placed
+      selected={selected === dog._key}
+      onTap={() => setSelected((c) => (c === dog._key ? null : dog._key))}
+      onUnassign={() => move(dog._key, '')}
+      onSaveFeed={(slot, val) => saveFeed(dog._key, slot, val)}
+      setInteracting={setInteracting}
+      onDragStart={() => { setDragId(dog._key); setInteracting(true); }}
+      onDragEnd={() => { setDragId(null); setInteracting(false); }}
+    />
+  );
+
+  const selectedDog = dogs.find((d) => d._key === selected);
+  const placedCount = dogs.length - unplaced.length;
+
+  return (
+    <div>
+      <PageHeader
+        title="Habitaciones"
+        subtitle={`${dogs.length} ${dogs.length === 1 ? 'perro hoy' : 'perros hoy'} · ${placedCount} en habitación · ${unplaced.length} sin asignar`}
+      />
+      <div style={{ padding: isMobile ? '0 16px 60px' : '0 32px 60px' }}>
+        {selectedDog && (
+          <div style={{ position: 'sticky', top: 8, zIndex: 5, marginBottom: 12, padding: '10px 14px', background: C.ink, color: C.cream, borderRadius: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 14 }}>Moviendo <strong>{selectedDog.pet || selectedDog.guest}</strong> — toca una habitación (o el área "Sin asignar").</span>
+            <button onClick={() => setSelected(null)} style={{ border: `1px solid ${C.cream}`, background: 'transparent', color: C.cream, borderRadius: 999, padding: '4px 12px', fontSize: 12, cursor: 'pointer' }}>Cancelar</button>
+          </div>
+        )}
+
+        {/* Unassigned tray — also a drop target to pull a dog back out of a room. */}
+        <div
+          onClick={() => { if (selected) move(selected, ''); }}
+          onDragOver={(e) => { e.preventDefault(); }}
+          onDrop={(e) => { e.preventDefault(); onDrop(''); }}
+          style={{ marginBottom: 20, padding: 12, border: `1px dashed ${C.ink15}`, borderRadius: 10, background: 'rgba(33,57,44,0.02)' }}
+        >
+          <div className="eyebrow eyebrow-sm" style={{ opacity: 0.7, marginBottom: unplaced.length ? 10 : 0 }}>Sin asignar · {unplaced.length}</div>
+          {unplaced.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 8 }}>
+              {unplaced.map((dog) => (
+                <RoomDogCard
+                  key={dog._key}
+                  dog={dog}
+                  ov={board[dog._key]}
+                  placed={false}
+                  selected={selected === dog._key}
+                  onTap={() => setSelected((c) => (c === dog._key ? null : dog._key))}
+                  onUnassign={() => {}}
+                  onSaveFeed={(slot, val) => saveFeed(dog._key, slot, val)}
+                  setInteracting={setInteracting}
+                  onDragStart={() => { setDragId(dog._key); setInteracting(true); }}
+                  onDragEnd={() => { setDragId(null); setInteracting(false); }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {dogs.length === 0 ? (
+          <div style={{ padding: 28, background: 'rgba(33,57,44,0.04)', borderRadius: 12, opacity: 0.65, fontSize: 14, textAlign: 'center' }}>
+            No hay perros en casa hoy.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            <RoomColumn title="Norte · 1–21" rooms={NORTE_ROOMS} byRoom={byRoom} selectionActive={!!selected} onRoomTap={onRoomTap} onDrop={onDrop} renderDog={renderDog} />
+            <RoomColumn title="Sur · A–U" rooms={SUR_ROOMS} byRoom={byRoom} selectionActive={!!selected} onRoomTap={onRoomTap} onDrop={onDrop} renderDog={renderDog} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const route = useRoute();
   const isAdmin = route === '#admin';
@@ -2526,6 +2873,8 @@ export default function App() {
   const [calendlyEvents, setCalendlyEvents] = useState([]);
   const [bridgeReservations, setBridgeReservations] = useState([]);
   const [dogExtras, setDogExtras] = useState({});
+  const [roomBoard, setRoomBoard] = useState({});
+  const roomInteractingRef = useRef(false);
   const [seoData, setSeoData] = useState(null);
   const [fetchErrors, setFetchErrors] = useState({ mews: null, hubspot: null, calendly: null, bridge: null, seo: null });
 
@@ -2572,6 +2921,7 @@ export default function App() {
         }));
         setBridgeReservations(bridgeRehydrated);
         if (cache.dogExtras && typeof cache.dogExtras === 'object') setDogExtras(cache.dogExtras);
+        if (cache.roomBoard && typeof cache.roomBoard === 'object') setRoomBoard(cache.roomBoard);
         if (cache.seo && typeof cache.seo === 'object') setSeoData(cache.seo);
       }
     } catch {}
@@ -2640,11 +2990,17 @@ export default function App() {
     }
 
     let dogExtrasMap = null;
+    let roomBoardMap = null;
     if (cfg.hubspotUrl) {
       try {
         dogExtrasMap = await fetchDogExtras(cfg.hubspotUrl, cfg.hubspotKey);
       } catch {
         // dog_extras tab missing or unreachable — keep whatever we already have
+      }
+      try {
+        roomBoardMap = await fetchRoomBoard(cfg.hubspotUrl, cfg.hubspotKey);
+      } catch {
+        // room_board tab missing or unreachable — keep whatever we already have
       }
     }
 
@@ -2656,6 +3012,7 @@ export default function App() {
     setBridgeReservations(bridgeRows);
     if (seoPayload) setSeoData(seoPayload);
     if (dogExtrasMap) setDogExtras(dogExtrasMap);
+    if (roomBoardMap && !roomInteractingRef.current) setRoomBoard(roomBoardMap);
     setFetchErrors(errors);
 
     // Save to cache for resilience
@@ -2688,6 +3045,7 @@ export default function App() {
         })),
         seo: seoPayload || seoData,
         dogExtras: dogExtrasMap || dogExtras,
+        roomBoard: roomBoardMap || roomBoard,
       };
       try {
         await storage.set(STORAGE_KEYS.cache, JSON.stringify(cache), true);
@@ -2700,7 +3058,7 @@ export default function App() {
     }
 
     setTimeout(() => setRefreshing(false), 500);
-  }, [config, meta, dogExtras]);
+  }, [config, meta, dogExtras, roomBoard]);
 
   useEffect(() => {
     (async () => {
@@ -2723,7 +3081,9 @@ export default function App() {
   useEffect(() => {
     if (isAdmin) return;
     if (!config.mewsUrl && !config.hubspotUrl && !config.calendlyUrl && !config.bridgeUrl) return;
-    const id = setInterval(() => refresh(config), 60000);
+    // Skip the tick while staff are mid-move/edit on the room board so an
+    // in-flight optimistic change isn't clobbered by server state.
+    const id = setInterval(() => { if (!roomInteractingRef.current) refresh(config); }, 60000);
     return () => clearInterval(id);
   }, [isAdmin, config, refresh]);
 
@@ -2746,6 +3106,18 @@ export default function App() {
         photo: next.photo || '',
       }).catch(() => { /* fire-and-forget; reconciled on next refresh */ });
       return { ...prev, [dogId]: next };
+    });
+  }, [config.hubspotUrl, config.hubspotKey]);
+
+  // Room board: optimistic local update + partial write. Only the changed
+  // fields go to the sheet (a room move never blanks a feed override).
+  const saveRoomEntry = useCallback((reservation, patch) => {
+    if (!reservation) return;
+    setRoomBoard((prev) => {
+      const next = { ...(prev[reservation] || {}), ...patch };
+      saveRoomBoard(config.hubspotUrl, config.hubspotKey, reservation, patch)
+        .catch(() => { /* fire-and-forget; reconciled on next refresh */ });
+      return { ...prev, [reservation]: next };
     });
   }, [config.hubspotUrl, config.hubspotKey]);
 
@@ -2776,6 +3148,7 @@ export default function App() {
     })));
     setCalendlyEvents(DEMO_CALENDLY);
     setBridgeReservations(buildDemoBridge());
+    setRoomBoard(DEMO_ROOM_BOARD);
     setSeoData(DEMO_SEO);
     const newMeta = { ...meta, lastUpdated: new Date().toISOString() };
     await storage.set(STORAGE_KEYS.meta, JSON.stringify(newMeta), true);
@@ -2883,6 +3256,9 @@ export default function App() {
         break;
       case '#/inhouse':
         routeBody = <InHouseView merged={merged} />;
+        break;
+      case '#/habitaciones':
+        routeBody = <RoomsView merged={merged} roomBoard={roomBoard} onSaveRoom={saveRoomEntry} onInteractingChange={(v) => { roomInteractingRef.current = v; }} />;
         break;
       case '#/mensual':
         routeBody = <MonthlyView reservations={bridgeReservations} capacity={meta.capacity} now={now} error={fetchErrors.bridge} configured={!!config.bridgeUrl} />;
