@@ -300,30 +300,6 @@ function rateNeedsTransport(rateName) {
   return /\bcon\s*transporte\b/i.test(String(rateName || ''));
 }
 
-function parseMewsRow(row, idx) {
-  return {
-    source: 'mews',
-    id: row.confirmation_number || `mews-${idx}`,
-    confirmation: row.confirmation_number || '',
-    guest: row.owner_name || '',
-    email: normEmail(row.owner_email),
-    arrival: parseDate(row.start_datetime),
-    departure: parseDate(row.end_datetime),
-    service: row.service || '',
-    spaceType: row.requested_category || '',
-    rateName: pickRateName(row),
-    rate: parseNumber(row.rate),
-    amount: parseNumber(row.total_amount),
-    notes: row.notes || '',
-    origin: row.origin || '',
-    travelAgency: row.travel_agency || '',
-    products: row.products || '',
-    personCount: parseInt(row.person_count) || 1,
-    enterprise: row.enterprise || '',
-    receivedAt: parseDate(row.received_at),
-  };
-}
-
 function parseHubSpotRow(row) {
   const arrDate = parseDate(row['Entrada (Check-in)']);
   const arrTime = row['Hora Estimada Entrada (Check-in)'];
@@ -443,8 +419,8 @@ function mergeReservations(mewsList, hubspotList) {
       weight: h?.weight || '',
       sex: h?.sex || '',
       age: h?.age || '',
-      address: h?.address || '',
-      phone: h?.phone || '',
+      address: h?.address || m.address || '',
+      phone: h?.phone || m.phone || '',
       sterilized: h?.sterilized,
       transport: h?.transport || false,
       allergies: h?.allergies || [],
@@ -897,8 +873,6 @@ const STORAGE_KEYS = {
 };
 
 const DEFAULT_CONFIG = {
-  mewsUrl: '',
-  mewsKey: '',
   hubspotUrl: '',
   hubspotKey: '',
   calendlyUrl: '',
@@ -956,21 +930,47 @@ function parseBridgeCreated(row) {
   return key ? parseDMYDateTime(row[key]) : null;
 }
 
+// The Mews "vista mensual" export is the single source of truth. Each row is
+// mapped to a superset shape that serves BOTH the monthly/management views
+// (number, customer, status, created, nights, totalAmount, …) AND the
+// operational views + HubSpot merge (id, guest, email, phone, address, …).
 function parseBridgeRow(row) {
+  const number = row.Number != null && row.Number !== '' ? String(row.Number) : '';
+  const guest = `${row['First name'] || ''} ${row['Last name'] || ''}`.trim() || row['Group name'] || '';
+  const arrival = parseBridgeDate(row.Arrival);
+  const departure = parseBridgeDate(row.Departure);
+  const created = parseBridgeCreated(row);
+  const amount = parseBridgeAmount(row['Total amount']);
+  const spaceCategory = row['Space category'] || '';
   return {
-    number: row.Number,
-    customer: `${row['First name'] || ''} ${row['Last name'] || ''}`.trim() || row['Group name'] || '',
+    source: 'mews',
+    // --- monthly / management shape ---
+    number,
+    customer: guest,
     status: row.Status || '',
-    arrival: parseBridgeDate(row.Arrival),
-    departure: parseBridgeDate(row.Departure),
-    created: parseBridgeCreated(row),
+    arrival,
+    departure,
+    created,
     spaceNumber: row['Space number'] != null ? String(row['Space number']) : '',
-    spaceCategory: row['Space category'] || '',
-    products: row.Products || '',
-    rateName: pickRateName(row),
+    spaceCategory,
     nights: Number(row['Count (days)']) || 0,
     personCount: Number(row['Person count']) || 1,
-    totalAmount: parseBridgeAmount(row['Total amount']),
+    totalAmount: amount,
+    // --- operational shape (feeds merged + HubSpot email join) ---
+    id: number || `br-${guest}-${arrival ? arrival.getTime() : Math.random()}`,
+    confirmation: number,
+    guest,
+    email: normEmail(row.Email),
+    phone: row.Telephone != null ? String(row.Telephone) : '',
+    address: row.Address || '',
+    spaceType: spaceCategory,
+    rateName: row.Rate || pickRateName(row),
+    rate: parseBridgeAmount(row['Average rate (daily)']) || parseBridgeAmount(row['Average rate (nightly)']),
+    amount,
+    products: row.Products || '',
+    notes: '',
+    origin: row.Origin || '',
+    receivedAt: created,
   };
 }
 
@@ -1563,7 +1563,7 @@ function ReservationDetailCard({ r }) {
 
       {/* Pills */}
       <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-        {/d[ií]a\s*(de\s*)?guarder/i.test(r.service || '') && (
+        {/d[ií]a\s*(de\s*)?guarder/i.test(`${r.rateName || ''} ${r.service || ''}`) && (
           <span style={{
             display: 'inline-flex', alignItems: 'center',
             padding: '4px 10px', borderRadius: 999,
@@ -1575,7 +1575,7 @@ function ReservationDetailCard({ r }) {
             Guardería
           </span>
         )}
-        {/d[ií]a\s*(de\s*)?guarder/i.test(r.service || '') && (
+        {/d[ií]a\s*(de\s*)?guarder/i.test(`${r.rateName || ''} ${r.service || ''}`) && (
           <span style={{
             display: 'inline-flex', alignItems: 'center',
             padding: '4px 10px', borderRadius: 999,
@@ -2454,7 +2454,7 @@ function GuarderiaView({ merged }) {
     const limit = new Date(today); limit.setDate(limit.getDate() + 30); limit.setHours(23, 59, 59, 999);
     const out = [];
     merged.forEach((r) => {
-      const isGuarderia = /guarder/i.test(`${r.spaceType || ''} ${r.service || ''}`);
+      const isGuarderia = /guarder/i.test(`${r.spaceType || ''} ${r.service || ''} ${r.rateName || ''}`);
       if (!isGuarderia) return;
       const time = r.arrival || r.departure;
       if (!time || time < today || time > limit) return;
@@ -2876,7 +2876,7 @@ export default function App() {
   const [roomBoard, setRoomBoard] = useState({});
   const roomInteractingRef = useRef(false);
   const [seoData, setSeoData] = useState(null);
-  const [fetchErrors, setFetchErrors] = useState({ mews: null, hubspot: null, calendly: null, bridge: null, seo: null });
+  const [fetchErrors, setFetchErrors] = useState({ hubspot: null, calendly: null, bridge: null, seo: null });
 
   /* ---- load config + cache ---- */
   const loadConfig = useCallback(async () => {
@@ -2930,21 +2930,12 @@ export default function App() {
   /* ---- fetch + merge from sources ---- */
   const refresh = useCallback(async (cfg = config) => {
     setRefreshing(true);
-    const errors = { mews: null, hubspot: null, calendly: null, bridge: null, seo: null };
-    let mewsRows = [];
+    const errors = { hubspot: null, calendly: null, bridge: null, seo: null };
     let hubspotRows = [];
     let calendlyRows = [];
     let bridgeRows = [];
     let seoPayload = null;
 
-    if (cfg.mewsUrl) {
-      try {
-        const raw = await fetchSheet(cfg.mewsUrl, cfg.mewsKey);
-        mewsRows = raw.map(parseMewsRow);
-      } catch (e) {
-        errors.mews = e.message;
-      }
-    }
     if (cfg.hubspotUrl) {
       try {
         const raw = await fetchSheet(cfg.hubspotUrl, cfg.hubspotKey);
@@ -3004,7 +2995,11 @@ export default function App() {
       }
     }
 
-    const { merged: mergedRows, pending: pendingRows } = mergeReservations(mewsRows, hubspotRows);
+    // The Bridge (vista mensual) is the sole reservation source. Operational
+    // views use active reservations only (cancellations excluded); the raw
+    // bridgeRows still feed the monthly/management views via their own filter.
+    const activeBridge = bridgeRows.filter((r) => BRIDGE_VALID_STATUS.has(r.status));
+    const { merged: mergedRows, pending: pendingRows } = mergeReservations(activeBridge, hubspotRows);
     setMerged(mergedRows);
     setPending(pendingRows);
     setHubspot(hubspotRows);
@@ -3071,7 +3066,7 @@ export default function App() {
   const didInitialFetch = useRef(false);
   useEffect(() => {
     if (loading || didInitialFetch.current) return;
-    if (config.mewsUrl || config.hubspotUrl || config.calendlyUrl || config.bridgeUrl || config.seoUrl) {
+    if (config.hubspotUrl || config.calendlyUrl || config.bridgeUrl || config.seoUrl) {
       didInitialFetch.current = true;
       refresh(config);
     }
@@ -3080,7 +3075,7 @@ export default function App() {
   // Auto-refresh every 60s on any non-admin route (only if any source is configured)
   useEffect(() => {
     if (isAdmin) return;
-    if (!config.mewsUrl && !config.hubspotUrl && !config.calendlyUrl && !config.bridgeUrl) return;
+    if (!config.hubspotUrl && !config.calendlyUrl && !config.bridgeUrl) return;
     // Skip the tick while staff are mid-move/edit on the room board so an
     // in-flight optimistic change isn't clobbered by server state.
     const id = setInterval(() => { if (!roomInteractingRef.current) refresh(config); }, 60000);
@@ -3161,7 +3156,7 @@ export default function App() {
     setCalendlyEvents([]);
     setBridgeReservations([]);
     setSeoData(null);
-    setFetchErrors({ mews: null, hubspot: null, calendly: null, bridge: null, seo: null });
+    setFetchErrors({ hubspot: null, calendly: null, bridge: null, seo: null });
     await storage.delete(STORAGE_KEYS.cache, true);
   };
 
@@ -3201,7 +3196,7 @@ export default function App() {
     );
   }
 
-  const isConfigured = !!(config.mewsUrl || config.hubspotUrl || config.calendlyUrl || config.bridgeUrl);
+  const isConfigured = !!(config.hubspotUrl || config.calendlyUrl || config.bridgeUrl);
   const sidebarWidth = collapsed ? 64 : 220;
 
   // Management login page renders without the regular sidebar.
@@ -3418,7 +3413,7 @@ function KioskView({ merged, pending, calendlyEvents, meta, now, refreshing, fet
   const lastUpdatedLabel = meta.lastUpdated
     ? `actualizado ${new Date(meta.lastUpdated).toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
     : 'sin datos';
-  const hasAnyError = !!(fetchErrors.mews || fetchErrors.hubspot);
+  const hasAnyError = !!(fetchErrors.bridge || fetchErrors.hubspot);
   const isEmpty = !isConfigured && merged.length === 0;
 
   return (
@@ -3932,7 +3927,7 @@ function GuestRow({ r, time, variant }) {
   const eyebrowIcon = variant === 'arrival' ? '↘' : variant === 'departure' ? '↗' : '●';
   const eyebrowColor = variant === 'arrival' ? C.ink : variant === 'departure' ? C.ocre : C.celeste;
   const breedSize = [r.breed, r.size].filter(Boolean).join(' · ');
-  const isGuarderia = /guarder/i.test(`${r.spaceType || ''} ${r.service || ''}`);
+  const isGuarderia = /guarder/i.test(`${r.spaceType || ''} ${r.service || ''} ${r.rateName || ''}`);
   const clickable = !!r.hubspotId;
   const openFicha = clickable ? () => navigate(`#/clients/${encodeURIComponent(r.hubspotId)}`) : undefined;
   return (
@@ -4066,14 +4061,14 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, bridgeReserv
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16, marginBottom: 16 }}>
             <SourceField
-              title="Mews · Reservas"
+              title="Mews · Reservas (Vista mensual)"
               eyebrow="Origen 1"
-              status={merged.length > 0 ? `${merged.length} reservas` : 'sin datos'}
-              error={fetchErrors.mews}
-              urlValue={draft.mewsUrl}
-              keyValue={draft.mewsKey}
-              onUrlChange={(v) => setDraft({ ...draft, mewsUrl: v })}
-              onKeyChange={(v) => setDraft({ ...draft, mewsKey: v })}
+              status={merged.length > 0 ? `${merged.length} reservas` : (bridgeReservations.length > 0 ? `${bridgeReservations.length} reservas` : 'sin datos')}
+              error={fetchErrors.bridge}
+              urlValue={draft.bridgeUrl}
+              keyValue={draft.bridgeKey}
+              onUrlChange={(v) => setDraft({ ...draft, bridgeUrl: v })}
+              onKeyChange={(v) => setDraft({ ...draft, bridgeKey: v })}
             />
             <SourceField
               title="HubSpot · Intake"
@@ -4098,19 +4093,8 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, bridgeReserv
               tone="lila"
             />
             <SourceField
-              title="Mews Bridge · Vista mensual"
-              eyebrow="Origen 4"
-              status={bridgeReservations.length > 0 ? `${bridgeReservations.length} reservas` : 'sin datos'}
-              error={fetchErrors.bridge}
-              urlValue={draft.bridgeUrl}
-              keyValue={draft.bridgeKey}
-              onUrlChange={(v) => setDraft({ ...draft, bridgeUrl: v })}
-              onKeyChange={(v) => setDraft({ ...draft, bridgeKey: v })}
-              tone="ocre"
-            />
-            <SourceField
               title="SEO · Search Console"
-              eyebrow="Origen 5"
+              eyebrow="Origen 4"
               status={seoData?.summary ? `${seoData.queries?.length || 0} queries` : 'sin datos'}
               error={fetchErrors.seo}
               urlValue={draft.seoUrl}
@@ -4125,7 +4109,7 @@ function AdminView({ config, meta, merged, pending, calendlyEvents, bridgeReserv
             <button onClick={() => onSaveConfig(draft)} disabled={!dirty} className="btn">
               Guardar configuración
             </button>
-            <button onClick={onRefresh} disabled={refreshing || (!draft.mewsUrl && !draft.hubspotUrl && !draft.calendlyUrl && !draft.bridgeUrl && !draft.seoUrl)} className="btn celeste">
+            <button onClick={onRefresh} disabled={refreshing || (!draft.hubspotUrl && !draft.calendlyUrl && !draft.bridgeUrl && !draft.seoUrl)} className="btn celeste">
               {refreshing ? 'Actualizando…' : 'Probar / actualizar ahora'}
             </button>
             {dirty && <span className="eyebrow eyebrow-sm" style={{ color: C.brick }}>cambios sin guardar</span>}
