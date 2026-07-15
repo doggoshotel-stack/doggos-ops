@@ -2872,6 +2872,11 @@ export default function App() {
   const [hubspot, setHubspot] = useState([]);
   const [calendlyEvents, setCalendlyEvents] = useState([]);
   const [bridgeReservations, setBridgeReservations] = useState([]);
+  // Historical reservations from the separate "2025" tab in the Mews sheet.
+  // Mews only exports 12 months at a time, so 2025 lives in its own tab and is
+  // pulled independently — it feeds ONLY the P&L 2025 view, never the
+  // operational (current-year) views.
+  const [bridge2025, setBridge2025] = useState([]);
   const [dogExtras, setDogExtras] = useState({});
   const [roomBoard, setRoomBoard] = useState({});
   const roomInteractingRef = useRef(false);
@@ -2920,6 +2925,13 @@ export default function App() {
           created: r.created ? new Date(r.created) : null,
         }));
         setBridgeReservations(bridgeRehydrated);
+        const bridge2025Rehydrated = (cache.bridge2025 || []).map((r) => ({
+          ...r,
+          arrival: r.arrival ? new Date(r.arrival) : null,
+          departure: r.departure ? new Date(r.departure) : null,
+          created: r.created ? new Date(r.created) : null,
+        }));
+        setBridge2025(bridge2025Rehydrated);
         if (cache.dogExtras && typeof cache.dogExtras === 'object') setDogExtras(cache.dogExtras);
         if (cache.roomBoard && typeof cache.roomBoard === 'object') setRoomBoard(cache.roomBoard);
         if (cache.seo && typeof cache.seo === 'object') setSeoData(cache.seo);
@@ -2966,6 +2978,22 @@ export default function App() {
       }
     }
 
+    // Historical 2025 reservations — same bridge, separate "2025" tab. Failure
+    // here must never block the current-year data, so it swallows its own error.
+    let bridge2025Rows = [];
+    if (cfg.bridgeUrl) {
+      try {
+        const url = `${cfg.bridgeUrl}${cfg.bridgeUrl.includes('?') ? '&' : '?'}key=${encodeURIComponent(cfg.bridgeKey || '')}&sheet=2025`;
+        const res = await fetch(url, { redirect: 'follow' });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data?.rows)) bridge2025Rows = data.rows.map(parseBridgeRow);
+        }
+      } catch {
+        // "2025" tab missing or unreachable — keep whatever we already have
+      }
+    }
+
     if (cfg.seoUrl) {
       try {
         const url = `${cfg.seoUrl}${cfg.seoUrl.includes('?') ? '&' : '?'}key=${encodeURIComponent(cfg.seoKey || '')}`;
@@ -3005,6 +3033,9 @@ export default function App() {
     setHubspot(hubspotRows);
     setCalendlyEvents(calendlyRows);
     setBridgeReservations(bridgeRows);
+    // Only overwrite when the 2025 pull actually returned rows, so a transient
+    // fetch failure doesn't blank an already-loaded historical P&L.
+    if (bridge2025Rows.length > 0) setBridge2025(bridge2025Rows);
     if (seoPayload) setSeoData(seoPayload);
     if (dogExtrasMap) setDogExtras(dogExtrasMap);
     if (roomBoardMap && !roomInteractingRef.current) setRoomBoard(roomBoardMap);
@@ -3038,6 +3069,12 @@ export default function App() {
           departure: r.departure?.toISOString() || null,
           created: r.created?.toISOString() || null,
         })),
+        bridge2025: (bridge2025Rows.length > 0 ? bridge2025Rows : bridge2025).map((r) => ({
+          ...r,
+          arrival: r.arrival?.toISOString() || null,
+          departure: r.departure?.toISOString() || null,
+          created: r.created?.toISOString() || null,
+        })),
         seo: seoPayload || seoData,
         dogExtras: dogExtrasMap || dogExtras,
         roomBoard: roomBoardMap || roomBoard,
@@ -3053,7 +3090,7 @@ export default function App() {
     }
 
     setTimeout(() => setRefreshing(false), 500);
-  }, [config, meta, dogExtras, roomBoard]);
+  }, [config, meta, dogExtras, roomBoard, bridge2025]);
 
   useEffect(() => {
     (async () => {
@@ -3224,6 +3261,7 @@ export default function App() {
       <ManagementRouter
         route={route}
         reservations={bridgeReservations}
+        reservations2025={bridge2025}
         capacity={meta.capacity}
         now={now}
         seoData={seoData}

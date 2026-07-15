@@ -24,7 +24,7 @@ const MGMT_ROUTES = [
 
 export const MGMT_NAV = MGMT_ROUTES;
 
-export default function ManagementRouter({ route, reservations, capacity, now, seoData, seoError }) {
+export default function ManagementRouter({ route, reservations, reservations2025, capacity, now, seoData, seoError }) {
   const sub = MGMT_ROUTES.find(r => r.hash === route)?.comp || 'pnl';
 
   if (sub === 'pnl') {
@@ -32,7 +32,8 @@ export default function ManagementRouter({ route, reservations, capacity, now, s
   }
 
   if (sub === 'pnl2025') {
-    return <PnL reservations={reservations} capacity={capacity} now={now} year={2025} />;
+    // 2025 lives in its own Mews tab (12-month export limit), passed separately.
+    return <PnL reservations={reservations2025 || []} capacity={capacity} now={now} year={2025} />;
   }
 
   if (sub === 'customers') {
