@@ -188,9 +188,13 @@ function fmtPct(p) {
   return `${Math.round(p * 100)}%`;
 }
 
-export default function PnL({ reservations, capacity = 42, now = new Date() }) {
-  const year = 2026;
+export default function PnL({ reservations, capacity = 42, now = new Date(), year = 2026 }) {
   const data = useMemo(() => computePnL(reservations, year, capacity, now), [reservations, year, capacity, now]);
+
+  // A year strictly before the current one is fully closed: every month is an
+  // actual, so live-pace rows (OTB, pickup, forecast) are all zero or equal to
+  // actuals — pure noise. Hide them and show a clean historical P&L instead.
+  const isHistorical = now.getFullYear() > year;
 
   const rows = [
     { kind: 'section', label: 'Revenue' },
@@ -207,14 +211,16 @@ export default function PnL({ reservations, capacity = 42, now = new Date() }) {
     { kind: 'metric', label: 'ADR',         values: data.months.map(m => fmtEUR(m.adr)), fy: fmtEUR(data.fy.adr) },
     { kind: 'metric', label: 'RevPAR',      values: data.months.map(m => fmtEUR(m.revpar)), fy: fmtEUR(data.fy.revpar) },
 
-    { kind: 'section', label: 'Pickup & pace' },
-    { kind: 'metric', label: 'OTB',        values: data.months.map(m => fmtEUR(m.otb, { compact: true })), fy: fmtEUR(data.fy.otb, { compact: true }) },
-    { kind: 'metric', label: 'Pickup 7d',  values: data.months.map(m => fmtEUR(m.pickup7, { compact: true })), fy: fmtEUR(data.fy.pickup7, { compact: true }) },
-    { kind: 'metric', label: 'Pickup 30d', values: data.months.map(m => fmtEUR(m.pickup30, { compact: true })), fy: fmtEUR(data.fy.pickup30, { compact: true }) },
+    ...(isHistorical ? [] : [
+      { kind: 'section', label: 'Pickup & pace' },
+      { kind: 'metric', label: 'OTB',        values: data.months.map(m => fmtEUR(m.otb, { compact: true })), fy: fmtEUR(data.fy.otb, { compact: true }) },
+      { kind: 'metric', label: 'Pickup 7d',  values: data.months.map(m => fmtEUR(m.pickup7, { compact: true })), fy: fmtEUR(data.fy.pickup7, { compact: true }) },
+      { kind: 'metric', label: 'Pickup 30d', values: data.months.map(m => fmtEUR(m.pickup30, { compact: true })), fy: fmtEUR(data.fy.pickup30, { compact: true }) },
 
-    { kind: 'section', label: 'Forecast' },
-    { kind: 'metric', label: 'Forecast cierre (proj.)', values: data.months.map(m => (m.is_actual || m.forecast != null) ? fmtEUR(m.projected, { compact: true }) : '—'), fy: fmtEUR(data.fy.projected, { compact: true }), bold: true },
-    { kind: 'metric', label: 'Pickup restante (proj.)', values: data.months.map(m => (!m.is_actual && m.forecast != null) ? fmtEUR(Math.max(0, m.forecast - m.rooms_revenue), { compact: true }) : '—'), fy: fmtEUR(data.fy.remaining, { compact: true }), note: 'proyección' },
+      { kind: 'section', label: 'Forecast' },
+      { kind: 'metric', label: 'Forecast cierre (proj.)', values: data.months.map(m => (m.is_actual || m.forecast != null) ? fmtEUR(m.projected, { compact: true }) : '—'), fy: fmtEUR(data.fy.projected, { compact: true }), bold: true },
+      { kind: 'metric', label: 'Pickup restante (proj.)', values: data.months.map(m => (!m.is_actual && m.forecast != null) ? fmtEUR(Math.max(0, m.forecast - m.rooms_revenue), { compact: true }) : '—'), fy: fmtEUR(data.fy.remaining, { compact: true }), note: 'proyección' },
+    ]),
   ];
 
   const currentMonthIdx = now.getFullYear() === year ? now.getMonth() : -1;
@@ -254,11 +260,23 @@ export default function PnL({ reservations, capacity = 42, now = new Date() }) {
 
       {/* Metric strip */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 24 }}>
-        <Metric label="Revenue YTD" value={fmtEUR(data.ytd.rooms_revenue, { compact: true })} />
-        <Metric label="Revenue FY (proj.)" value={fmtEUR(data.fy.projected, { compact: true })} />
-        <Metric label="Occupancy FY" value={fmtPct(data.fy.occupancy_pct)} />
-        <Metric label="ADR FY" value={fmtEUR(data.fy.adr)} />
-        <Metric label="RevPAR FY" value={fmtEUR(data.fy.revpar)} />
+        {isHistorical ? (
+          <>
+            <Metric label="Revenue FY" value={fmtEUR(data.fy.rooms_revenue, { compact: true })} />
+            <Metric label="Room nights FY" value={String(data.fy.room_nights)} />
+            <Metric label="Occupancy FY" value={fmtPct(data.fy.occupancy_pct)} />
+            <Metric label="ADR FY" value={fmtEUR(data.fy.adr)} />
+            <Metric label="RevPAR FY" value={fmtEUR(data.fy.revpar)} />
+          </>
+        ) : (
+          <>
+            <Metric label="Revenue YTD" value={fmtEUR(data.ytd.rooms_revenue, { compact: true })} />
+            <Metric label="Revenue FY (proj.)" value={fmtEUR(data.fy.projected, { compact: true })} />
+            <Metric label="Occupancy FY" value={fmtPct(data.fy.occupancy_pct)} />
+            <Metric label="ADR FY" value={fmtEUR(data.fy.adr)} />
+            <Metric label="RevPAR FY" value={fmtEUR(data.fy.revpar)} />
+          </>
+        )}
       </div>
 
       {/* P&L table */}
@@ -306,14 +324,26 @@ export default function PnL({ reservations, capacity = 42, now = new Date() }) {
       </div>
 
       <div style={{ marginTop: 16, fontSize: 11, opacity: 0.55, letterSpacing: '0.02em', lineHeight: 1.6 }}>
-        Mes en curso destacado en amarillo. Meses futuros en gris.
-        El <strong>forecast</strong> suma a las reservas que ya tiene cada mes (OTB) el pickup que
-        históricamente sigue entrando a partir de este punto del calendario, estimado con la fecha
-        de creación de cada reserva en los meses ya cerrados. Por eso nunca baja del OTB real. Como
-        solo hay histórico desde oct 2025, los meses más lejanos (con poco OTB todavía) se apoyan
-        casi solo en la media de meses cerrados — tómalos como orientativos. No hay comparativa con
-        el año anterior (STLY). Filas de productos extra (Transportes, Late checkout, Guardería,
-        Lavado) marcadas <em>pendiente</em>: requieren desglose por línea en la exportación de Mews.
+        {isHistorical ? (
+          <>
+            Año cerrado: todos los meses son cifras reales (actuals) de Mews, sin proyección.
+            Occupancy, ADR y RevPAR se calculan sobre la capacidad actual ({capacity} plazas), así
+            que trátalos como referencia si la capacidad de {year} era distinta. Filas de productos
+            extra (Transportes, Late checkout, Guardería, Lavado) marcadas <em>pendiente</em>:
+            requieren desglose por línea en la exportación de Mews.
+          </>
+        ) : (
+          <>
+            Mes en curso destacado en amarillo. Meses futuros en gris.
+            El <strong>forecast</strong> suma a las reservas que ya tiene cada mes (OTB) el pickup que
+            históricamente sigue entrando a partir de este punto del calendario, estimado con la fecha
+            de creación de cada reserva en los meses ya cerrados. Por eso nunca baja del OTB real. Como
+            solo hay histórico desde oct 2025, los meses más lejanos (con poco OTB todavía) se apoyan
+            casi solo en la media de meses cerrados — tómalos como orientativos. No hay comparativa con
+            el año anterior (STLY). Filas de productos extra (Transportes, Late checkout, Guardería,
+            Lavado) marcadas <em>pendiente</em>: requieren desglose por línea en la exportación de Mews.
+          </>
+        )}
       </div>
     </div>
   );
