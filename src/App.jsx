@@ -2223,7 +2223,11 @@ function transportJobsForRow(r) {
   const needsTransport = rateNeedsTransport(r.rateName);
   const hasIda = /transporte\s*ida/i.test(products) || needsTransport;
   const hasVuelta = /transporte\s*vuelta/i.test(products) || needsTransport;
-  const hasTardia = /salida\s*tard/i.test(products);
+  const hasTransport = hasIda || hasVuelta;
+  // Late checkout is only relevant here when the dog actually has transport —
+  // it shifts the dropoff time. A booking with late checkout but no transport
+  // (owner picks up) is not a transport job and must not appear in this view.
+  const hasTardia = hasTransport && /salida\s*tard/i.test(products);
   const out = [];
   if (hasIda && r.arrival) out.push({ kind: 'ida', time: r.arrival, r });
   if (hasVuelta && r.departure) out.push({ kind: 'vuelta', time: r.departure, r });
