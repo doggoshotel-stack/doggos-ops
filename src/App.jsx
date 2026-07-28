@@ -2212,73 +2212,298 @@ function Section({ title, rows }) {
   );
 }
 
-function TransportsView({ merged }) {
-  const isMobile = useIsMobile();
-  const jobs = useMemo(() => {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const limit = new Date(today); limit.setDate(limit.getDate() + 30); limit.setHours(23, 59, 59, 999);
+// Transport legs for a reservation, as calendar jobs.
+//   ida    → pickup on the arrival date
+//   vuelta → dropoff on the departure date
+//   tardia → late checkout on the departure date (coordination, not a trip)
+// "Con Transporte" rates (e.g. daycare) imply both pickup and dropoff even when
+// no explicit "Transporte ida/vuelta" product line exists.
+function transportJobsForRow(r) {
+  const products = String(r.products || '');
+  const needsTransport = rateNeedsTransport(r.rateName);
+  const hasIda = /transporte\s*ida/i.test(products) || needsTransport;
+  const hasVuelta = /transporte\s*vuelta/i.test(products) || needsTransport;
+  const hasTardia = /salida\s*tard/i.test(products);
+  const out = [];
+  if (hasIda && r.arrival) out.push({ kind: 'ida', time: r.arrival, r });
+  if (hasVuelta && r.departure) out.push({ kind: 'vuelta', time: r.departure, r });
+  if (hasTardia && r.departure) out.push({ kind: 'tardia', time: r.departure, r });
+  return out;
+}
+
+// Cell shading by number of trips (recogidas + entregas) that day.
+const TRANSPORT_TIERS = [
+  { max: 0, bg: '#f0e9d6', fg: '#6b7d72' },
+  { max: 2, bg: '#c9d5a0', fg: '#3d5a1f' },
+  { max: 5, bg: '#8fb070', fg: '#1a2d10' },
+  { max: Infinity, bg: '#2d5239', fg: '#dde839' },
+];
+function transportTier(n) {
+  for (const t of TRANSPORT_TIERS) if (n <= t.max) return t;
+  return TRANSPORT_TIERS[TRANSPORT_TIERS.length - 1];
+}
+
+const WEEKDAYS_ES_MON = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
+
+function TransportsView({ merged, now = new Date() }) {
+  const [cursor, setCursor] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
+  const [selectedDay, setSelectedDay] = useState(null);
+
+  const year = cursor.getFullYear();
+  const month = cursor.getMonth();
+
+  // All transport jobs across the dataset (recomputed only when data changes).
+  const allJobs = useMemo(() => {
     const out = [];
-    merged.forEach((r) => {
-      const products = String(r.products || '');
-      // "Con Transporte" rates (e.g. daycare) imply both pickup and dropoff,
-      // even when no explicit "Transporte ida/vuelta" product line exists.
-      const needsTransport = rateNeedsTransport(r.rateName);
-      const hasIda = /transporte\s*ida/i.test(products) || needsTransport;
-      const hasVuelta = /transporte\s*vuelta/i.test(products) || needsTransport;
-      const hasTardia = /salida\s*tard/i.test(products);
-      if (hasIda && r.arrival && r.arrival >= today && r.arrival <= limit) {
-        out.push({ kind: 'ida', time: r.arrival, r });
-      }
-      if (hasVuelta && r.departure && r.departure >= today && r.departure <= limit) {
-        out.push({ kind: 'vuelta', time: r.departure, r });
-      }
-      if (hasTardia && r.departure && r.departure >= today && r.departure <= limit) {
-        out.push({ kind: 'tardia', time: r.departure, r });
-      }
-    });
-    out.sort((a, b) => a.time.getTime() - b.time.getTime());
+    merged.forEach((r) => { transportJobsForRow(r).forEach((j) => out.push(j)); });
     return out;
   }, [merged]);
 
-  const byDay = useMemo(() => {
-    const groups = new Map();
-    jobs.forEach((j) => {
-      const k = dateKey(j.time);
-      if (!groups.has(k)) groups.set(k, []);
-      groups.get(k).push(j);
+  // Per-day buckets for the visible month.
+  const days = useMemo(() => {
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const byDay = new Map();
+    for (let d = 1; d <= daysInMonth; d++) {
+      byDay.set(d, { day: d, date: new Date(year, month, d), ida: 0, vuelta: 0, tardia: 0, jobs: [] });
+    }
+    allJobs.forEach((j) => {
+      const t = j.time;
+      if (t.getFullYear() !== year || t.getMonth() !== month) return;
+      const bucket = byDay.get(t.getDate());
+      if (!bucket) return;
+      bucket[j.kind] += 1;
+      bucket.jobs.push(j);
     });
-    return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [jobs]);
+    for (const b of byDay.values()) {
+      b.trips = b.ida + b.vuelta;
+      b.jobs.sort((a, c) => a.time.getTime() - c.time.getTime());
+    }
+    return Array.from(byDay.values());
+  }, [allJobs, year, month]);
+
+  const totals = useMemo(() => {
+    const trips = days.reduce((a, d) => a + d.trips, 0);
+    const ida = days.reduce((a, d) => a + d.ida, 0);
+    const vuelta = days.reduce((a, d) => a + d.vuelta, 0);
+    const avg = days.length > 0 ? trips / days.length : 0;
+    let peak = days[0] || { trips: 0, day: 1 };
+    for (const d of days) if (d.trips > peak.trips) peak = d;
+    return { trips, ida, vuelta, avg, peak };
+  }, [days]);
+
+  const goPrev = () => setCursor(new Date(year, month - 1, 1));
+  const goNext = () => setCursor(new Date(year, month + 1, 1));
+  const goToday = () => setCursor(new Date(now.getFullYear(), now.getMonth(), 1));
+
+  // First weekday of month, Monday-first (0 = Mon, 6 = Sun)
+  const firstWeekday = (() => {
+    const js = new Date(year, month, 1).getDay();
+    return js === 0 ? 6 : js - 1;
+  })();
+  const cells = [...Array(firstWeekday).fill(null), ...days];
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const monthLabel = `${MONTH_ES[month]} ${year}`.toUpperCase();
+  const isCurrentMonth = now.getFullYear() === year && now.getMonth() === month;
 
   return (
-    <div>
-      <PageHeader title="Transportes" subtitle={`Próximos 30 días · ${jobs.length} ${jobs.length === 1 ? 'servicio' : 'servicios'}`} />
-      {byDay.length === 0 ? (
-        <div style={{ margin: isMobile ? '0 16px 60px' : '0 32px 60px', padding: 28, background: 'rgba(33, 57, 44, 0.04)', borderRadius: 12, color: C.ink, opacity: 0.65, fontSize: 14, textAlign: 'center' }}>
-          Sin transportes programados en los próximos 30 días.
+    <div className="tv-page" style={{ padding: '32px 32px 80px', maxWidth: 1280, margin: '0 auto' }}>
+      <style>{`
+        .tv-kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+        .tv-weekday-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-bottom: 8px; }
+        .tv-calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+        @media (max-width: 760px) {
+          .tv-page { padding: 20px 12px 60px !important; }
+          .tv-header-title { font-size: 38px !important; }
+          .tv-header-nav { width: 100%; justify-content: space-between; }
+          .tv-kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+          .tv-kpi-value { font-size: 32px !important; }
+          .tv-cal-tile { padding: 10px 8px !important; }
+          .tv-weekday-row { gap: 3px !important; margin-bottom: 6px; }
+          .tv-weekday-row > div { font-size: 9px !important; padding: 0 !important; }
+          .tv-calendar-grid { gap: 3px !important; }
+          .tv-cell { min-height: 54px !important; padding: 4px 2px !important; }
+          .tv-cell-day { font-size: 13px !important; }
+          .tv-cell-bottom { justify-content: center !important; gap: 2px !important; margin-top: 3px !important; }
+          .tv-badge-trips { font-size: 10px !important; padding: 1px 5px !important; }
+          .tv-badge-ida, .tv-badge-vuelta { width: 6px; height: 6px; padding: 0 !important; font-size: 0 !important; line-height: 0; overflow: hidden; }
+          .tv-pad { min-height: 54px !important; }
+        }
+      `}</style>
+
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 16, marginBottom: 28 }}>
+        <div>
+          <h1 className="display tv-header-title" style={{ fontSize: 56, lineHeight: 0.95, color: C.ink, marginBottom: 6 }}>
+            Transportes
+          </h1>
+          <div className="eyebrow" style={{ opacity: 0.65 }}>
+            RECOGIDAS · ENTREGAS · {monthLabel}
+          </div>
         </div>
-      ) : (
-        <div style={{ padding: isMobile ? '0 16px 60px' : '0 32px 60px' }}>
-          {byDay.map(([dKey, dayJobs]) => <TransportDayBlock key={dKey} dKey={dKey} jobs={dayJobs} />)}
+        <div className="tv-header-nav" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button onClick={goPrev} className="btn secondary sm" style={{ padding: '8px 12px' }} aria-label="Mes anterior">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 3 L4 8 L10 13" /></svg>
+          </button>
+          <button onClick={goToday} className="btn secondary sm" style={{ minWidth: 110 }}>
+            {monthLabel}
+          </button>
+          <button onClick={goNext} className="btn secondary sm" style={{ padding: '8px 12px' }} aria-label="Mes siguiente">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 3 L12 8 L6 13" /></svg>
+          </button>
         </div>
+      </header>
+
+      {/* KPI strip */}
+      <div className="tv-kpi-grid">
+        <KpiTile label="Transportes mes" value={String(totals.trips)} sub={totals.trips === 1 ? 'viaje' : 'viajes'} />
+        <KpiTile label="Promedio / día" value={totals.avg.toFixed(1)} sub={`sobre ${days.length} días`} />
+        <KpiTile label="Recogidas" value={String(totals.ida)} sub="ida" />
+        <KpiTile label="Entregas" value={String(totals.vuelta)} sub="vuelta" />
+      </div>
+
+      {/* Calendar */}
+      <div className="tile tv-cal-tile" style={{ padding: 20 }}>
+        <div className="tv-weekday-row">
+          {WEEKDAYS_ES_MON.map((w) => (
+            <div key={w} className="eyebrow eyebrow-sm" style={{ opacity: 0.6, textAlign: 'center', padding: '4px 0' }}>{w}</div>
+          ))}
+        </div>
+        <div className="tv-calendar-grid">
+          {cells.map((d, idx) => {
+            if (!d) return <div key={`pad-${idx}`} className="tv-pad" style={{ minHeight: 86 }} />;
+            const tier = transportTier(d.trips);
+            const isToday = isCurrentMonth && dateKey(d.date) === dateKey(now);
+            const hasJobs = d.jobs.length > 0;
+            return (
+              <button
+                key={d.day}
+                className="tv-cell"
+                onClick={() => { if (hasJobs) setSelectedDay(d); }}
+                style={{
+                  background: tier.bg, color: tier.fg, borderRadius: 12,
+                  padding: '8px 10px', minHeight: 86,
+                  display: 'flex', flexDirection: 'column',
+                  boxShadow: isToday ? `0 0 0 2px ${C.amarillo}` : 'none',
+                  transition: 'box-shadow 120ms ease',
+                  position: 'relative', border: 'none', textAlign: 'left', font: 'inherit',
+                  cursor: hasJobs ? 'pointer' : 'default',
+                }}
+                onMouseEnter={(e) => { if (hasJobs && !isToday) e.currentTarget.style.boxShadow = `0 0 0 1.5px ${C.ink}`; }}
+                onMouseLeave={(e) => { if (!isToday) e.currentTarget.style.boxShadow = 'none'; }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <span className="display tv-cell-day" style={{ fontSize: 18, lineHeight: 1 }}>{d.day}</span>
+                </div>
+                <div className="tv-cell-bottom" style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginTop: 'auto' }}>
+                  {d.trips > 0 && (
+                    <span
+                      className="tv-badge-trips"
+                      title={`${d.trips} transporte${d.trips === 1 ? '' : 's'}`}
+                      style={{ background: C.ink, color: C.amarillo, fontSize: 13, fontWeight: 700, padding: '3px 9px', borderRadius: 999, display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2" />
+                        <circle cx="7" cy="17" r="2" /><circle cx="17" cy="17" r="2" /><path d="M9 17h6" />
+                      </svg>
+                      {d.trips}
+                    </span>
+                  )}
+                  {d.ida > 0 && (
+                    <span className="tv-badge-ida" title="Recogidas (ida)" style={{ background: C.amarillo, color: C.ink, fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 999 }}>↓{d.ida}</span>
+                  )}
+                  {d.vuelta > 0 && (
+                    <span className="tv-badge-vuelta" title="Entregas (vuelta)" style={{ background: C.celeste, color: C.ink, fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 999 }}>↑{d.vuelta}</span>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div style={{ marginTop: 16, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ background: C.ink, color: C.amarillo, fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999 }}>N</span>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', opacity: 0.7 }}>Transportes</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ background: C.amarillo, color: C.ink, fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 999 }}>↓N</span>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', opacity: 0.7 }}>Recogidas (ida)</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ background: C.celeste, color: C.ink, fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 999 }}>↑N</span>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', opacity: 0.7 }}>Entregas (vuelta)</span>
+        </div>
+      </div>
+
+      {selectedDay && (
+        <TransportDayModal day={selectedDay} onClose={() => setSelectedDay(null)} />
       )}
     </div>
   );
 }
 
-function TransportDayBlock({ dKey, jobs }) {
-  const date = new Date(dKey + 'T00:00:00');
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
-  let label;
-  if (date.getTime() === today.getTime()) label = 'Hoy';
-  else if (date.getTime() === tomorrow.getTime()) label = 'Mañana';
-  else label = `${WEEKDAY_ES[date.getDay()]} ${date.getDate()} ${MONTH_ES[date.getMonth()]}`;
+function KpiTile({ label, value, sub }) {
   return (
-    <section style={{ marginBottom: 24 }}>
-      <h3 className="display" style={{ fontSize: 22, color: C.ink, margin: '0 0 10px', textTransform: 'capitalize' }}>{label}</h3>
-      {jobs.map((j, i) => <TransportJobRow key={`${j.r.id}-${j.kind}-${i}`} job={j} />)}
-    </section>
+    <div className="tile dark" style={{ padding: 20 }}>
+      <div className="eyebrow eyebrow-sm" style={{ color: C.cream, opacity: 0.7 }}>{label}</div>
+      <div className="display tabular tv-kpi-value" style={{ fontSize: 44, lineHeight: 1, marginTop: 8, color: C.amarillo }}>{value}</div>
+      {sub && <div className="eyebrow eyebrow-sm" style={{ color: C.cream, opacity: 0.55, marginTop: 6 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function TransportDayModal({ day, onClose }) {
+  useEffect(() => {
+    const handleKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  const dateLabel = day.date.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+  return (
+    <div
+      onClick={onClose}
+      className="tv-modal-overlay"
+      style={{ position: 'fixed', inset: 0, background: 'rgba(33,57,44,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 24 }}
+    >
+      <style>{`
+        @media (max-width: 760px) {
+          .tv-modal-overlay { padding: 0 !important; align-items: flex-end !important; }
+          .tv-modal-card { padding: 20px 16px calc(20px + env(safe-area-inset-bottom)) !important; max-height: 92vh !important; border-radius: 18px 18px 0 0 !important; }
+        }
+      `}</style>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="tile tv-modal-card"
+        style={{ maxWidth: 640, width: '100%', maxHeight: '85vh', overflow: 'auto', padding: 32, background: C.cream }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, gap: 16 }}>
+          <div>
+            <div className="eyebrow eyebrow-sm" style={{ opacity: 0.65 }}>{dateLabel.toUpperCase()}</div>
+            <h2 className="display" style={{ fontSize: 40, lineHeight: 1, marginTop: 6 }}>
+              {day.trips} {day.trips === 1 ? 'transporte' : 'transportes'}
+            </h2>
+            <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6, marginTop: 6 }}>
+              {day.ida} recogida{day.ida === 1 ? '' : 's'} · {day.vuelta} entrega{day.vuelta === 1 ? '' : 's'}
+              {day.tardia > 0 ? ` · ${day.tardia} salida${day.tardia === 1 ? '' : 's'} tardía${day.tardia === 1 ? '' : 's'}` : ''}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Cerrar"
+            style={{ width: 36, height: 36, borderRadius: 999, border: `1.5px solid ${C.ink}`, background: 'transparent', cursor: 'pointer', fontSize: 16, fontWeight: 700, color: C.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+          >
+            ✕
+          </button>
+        </div>
+        <div>
+          {day.jobs.map((j, i) => <TransportJobRow key={`${j.r.id}-${j.kind}-${i}`} job={j} />)}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -3297,7 +3522,7 @@ export default function App() {
         routeBody = <MonthlyView reservations={bridgeReservations} capacity={meta.capacity} now={now} error={fetchErrors.bridge} configured={!!config.bridgeUrl} />;
         break;
       case '#/transports':
-        routeBody = <TransportsView merged={merged} />;
+        routeBody = <TransportsView merged={merged} now={now} />;
         break;
       case '#/guarderia':
         routeBody = <GuarderiaView merged={merged} />;
