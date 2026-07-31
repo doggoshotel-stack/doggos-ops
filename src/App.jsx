@@ -473,8 +473,9 @@ const ALERT_STYLES = {
   behavior:  { label: 'Manejo',          pastilla: 'pastilla ocre',    tint: '',              priority: 4 },
   diet:      { label: 'Dieta',           pastilla: 'pastilla celeste', tint: 'celeste-tint',  priority: 5 },
   transport: { label: 'Transporte',      pastilla: 'pastilla celeste', tint: '',              priority: 6 },
-  lateCheckout: { label: 'Salida tardía', pastilla: 'pastilla outline-celeste', tint: '',     priority: 7 },
-  vip:       { label: 'VIP',             pastilla: 'pastilla lila',    tint: '',              priority: 8 },
+  earlyCheckin: { label: 'Early Check-in',    pastilla: 'pastilla outline', tint: '',          priority: 7 },
+  lateCheckout: { label: 'Salida tardía', pastilla: 'pastilla outline-celeste', tint: '',     priority: 8 },
+  vip:       { label: 'VIP',             pastilla: 'pastilla lila',    tint: '',              priority: 9 },
 };
 
 function detectAlerts(record) {
@@ -514,6 +515,11 @@ function detectAlerts(record) {
   if (/transporte\s*vuelta/i.test(products)) transportLegs.push('Vuelta');
   if (transportLegs.length > 0) {
     alerts.push({ type: 'transport', detail: transportLegs.join(' + ') });
+  }
+
+  // Early check-in — Mews product line "Llegada temprana de tu perro" (08:15)
+  if (/llegada\s*tempran/i.test(products)) {
+    alerts.push({ type: 'earlyCheckin', detail: 'Llegada temprana (08:15)' });
   }
 
   // Late checkout — Mews product line "Salida tardía de tu perro"
@@ -677,7 +683,7 @@ function buildDemoRow(opts) {
 const DEMO_DATA = [
   // Today's arrivals
   buildDemoRow({ id: 'AAA-1042', guest: 'Pérez Soler', email: 'perez@example.com', pet: 'Luna', breed: 'Golden Retriever', size: 'Grande', weight: '28', arrival: offsetDate(0, 9), departure: offsetDate(5, 11), rate: 57, amount: 285, foodBrand: 'Acana', foodAmount: '350', notes: 'Muy sociable.' }),
-  buildDemoRow({ id: 'AAA-1043', guest: 'Martí Vila', email: 'marti@example.com', pet: 'Toby', breed: 'Bulldog Francés', size: 'Mediano', weight: '12', arrival: offsetDate(0, 10), departure: offsetDate(3, 11), rate: 65, amount: 195, transport: true, notes: 'Roncador, lo saben.' }),
+  buildDemoRow({ id: 'AAA-1043', guest: 'Martí Vila', email: 'marti@example.com', pet: 'Toby', breed: 'Bulldog Francés', size: 'Mediano', weight: '12', arrival: offsetDate(0, 10), departure: offsetDate(3, 11), rate: 65, amount: 195, transport: true, products: 'Llegada temprana de tu perro', notes: 'Roncador, lo saben.' }),
   buildDemoRow({ id: 'AAA-1044', guest: 'López Bernat', email: 'lopez@example.com', pet: 'Coco', breed: 'Caniche', size: 'Pequeño', weight: '8', arrival: offsetDate(0, 11), departure: offsetDate(7, 11), rate: 67, amount: 469, spaceType: 'Suite médica', pathologies: ['Diabetes'], medications: [{ name: 'Insulina', dose: '10 UI', schedule: '2x/día (mañana y noche)' }] }),
   buildDemoRow({ id: 'AAA-1045', guest: 'Rovira Casals', email: 'rovira@example.com', pet: 'Mia', breed: 'Bichón Maltés', size: 'Pequeño', weight: '5', arrival: offsetDate(0, 14), departure: offsetDate(4, 11), rate: 62, amount: 248, allergies: ['Pollo'], prohibitedFoods: 'pollo y derivados', foodBrand: 'Pienso hipoalergénico (aporta el dueño)' }),
   buildDemoRow({ id: 'AAA-1046', guest: 'Vidal Puig', email: 'vidal@example.com', pet: 'Rocky', breed: 'Pastor Alemán', size: 'Grande', weight: '34', arrival: offsetDate(0, 16), departure: offsetDate(2, 11), rate: 72, amount: 144, spaceType: 'Suite solo', notes: 'Reactivo con otros perros macho. Pasear solo.', rituals: 'Caminata individual por la mañana.' }),
@@ -749,13 +755,14 @@ function buildDemoBridge(now = new Date()) {
       if (created > now) continue; // not booked yet — stays out of the books
       // Draw customers from a bounded pool so some repeat (for loyalty analysis).
       const custNo = ((m * 7 + i * 5) % 45) + 1;
-      // Sprinkle transport + late-checkout products so the monthly-view
-      // car / clock icons are demo-visible.
+      // Sprinkle transport + late-checkout + early-checkin products so the
+      // monthly-view car / clock / bird icons are demo-visible.
       const transportMode = (i + m) % 4; // 0: ida, 1: vuelta, 2: both, 3: none
       const products = [
         transportMode === 0 || transportMode === 2 ? 'Transporte ida' : '',
         transportMode === 1 || transportMode === 2 ? 'Transporte vuelta' : '',
         (i + m) % 3 === 0 ? 'Salida tardía de tu perro' : '',
+        (i + m) % 5 === 0 ? 'Llegada temprana de tu perro' : '',
       ].filter(Boolean).join(', ');
       out.push({
         number: `BR-${n++}`,

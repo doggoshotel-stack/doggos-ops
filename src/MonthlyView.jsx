@@ -87,6 +87,12 @@ function hasLateCheckout(products) {
   return /salida\s*tard/i.test(String(products || ''));
 }
 
+// Mews product line "Llegada temprana de tu perro" → early check-in (dog
+// arrives at 08:15). Sits on the arrival date, mirroring late checkout.
+function hasEarlyCheckin(products) {
+  return /llegada\s*tempran/i.test(String(products || ''));
+}
+
 function CarIcon({ title }) {
   return (
     <span
@@ -114,6 +120,26 @@ function ClockIcon({ title }) {
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="9" />
         <path d="M12 7v5l3.5 2" />
+      </svg>
+    </span>
+  );
+}
+
+function BirdIcon({ title }) {
+  return (
+    <span
+      title={title}
+      aria-label={title}
+      style={{ display: 'inline-flex', color: C.ocre, flexShrink: 0 }}
+    >
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        {/* Lucide "bird" — perched songbird: head, body, beak, tail, legs */}
+        <path d="M16 7h.01" />
+        <path d="M3.4 18H12a8 8 0 0 0 8-8V7a4 4 0 0 0-7.28-2.3L2 20" />
+        <path d="m20 7 2 .5-2 .5" />
+        <path d="M10 18v3" />
+        <path d="M14 17.75V21" />
+        <path d="M7 18a6 6 0 0 0 3.84-10.61" />
       </svg>
     </span>
   );
@@ -471,6 +497,7 @@ function DayDetailModal({ day, reservations, onClose }) {
             items={arrivals}
             timeKey="arrival"
             transportLeg="ida"
+            showEarlyCheckin
           />
           <DaySection
             title="Salidas"
@@ -498,7 +525,7 @@ function DayDetailModal({ day, reservations, onClose }) {
   );
 }
 
-function DaySection({ title, count, pillBg, pillFg = C.ink, arrow, items, timeKey, formatRight, transportLeg, showLateCheckout }) {
+function DaySection({ title, count, pillBg, pillFg = C.ink, arrow, items, timeKey, formatRight, transportLeg, showLateCheckout, showEarlyCheckin }) {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
@@ -518,6 +545,7 @@ function DaySection({ title, count, pillBg, pillFg = C.ink, arrow, items, timeKe
             const showCar = transportLeg && hasTransportLeg(r.products, transportLeg, r.rateName);
             const carTitle = transportLeg === 'ida' ? 'Transporte ida · recogida' : 'Transporte vuelta · entrega';
             const showClock = showLateCheckout && hasLateCheckout(r.products);
+            const showBird = showEarlyCheckin && hasEarlyCheckin(r.products);
             return (
               <div
                 key={`${r.number}-${timeKey}`}
@@ -532,6 +560,7 @@ function DaySection({ title, count, pillBg, pillFg = C.ink, arrow, items, timeKe
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 14 }}>
                     {r.customer || `Reserva #${r.number}`}
                     {showCar && <CarIcon title={carTitle} />}
+                    {showBird && <BirdIcon title="Llegada temprana · early check-in (08:15)" />}
                     {showClock && <ClockIcon title="Salida tardía · late checkout" />}
                   </span>
                   <span className="tabular" style={{ fontSize: 12, opacity: 0.65 }}>{time}</span>
