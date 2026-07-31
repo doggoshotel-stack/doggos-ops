@@ -242,7 +242,7 @@ export default function Consent() {
           </div>
           <h1 style={{
             fontFamily: "'Cooper BT', Georgia, serif", fontWeight: 300,
-            fontSize: 30, lineHeight: 1.15, margin: '6px 0 4px',
+            fontSize: 'clamp(24px, 6.5vw, 30px)', lineHeight: 1.15, margin: '6px 0 4px',
           }}>
             Consentimiento Informado y Exoneración de Responsabilidad
           </h1>
@@ -268,7 +268,7 @@ export default function Consent() {
 
         {/* 1. Datos */}
         <Section n={1} title="Datos del Cliente y del Perro">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0 16px' }}>
             <Field label="Nombre del Tutor" value={f.nombre_tutor} onChange={set('nombre_tutor')} required invalid={err('nombre_tutor')} wide />
             <Field label="DNI / NIE" value={f.dni_nie} onChange={set('dni_nie')} required invalid={err('dni_nie')} />
             <Field label="Teléfono de contacto" type="tel" value={f.telefono} onChange={set('telefono')} required invalid={err('telefono')} />
