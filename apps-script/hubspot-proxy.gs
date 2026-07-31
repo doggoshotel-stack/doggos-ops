@@ -281,6 +281,18 @@ function saveSignature_(dataUrl, nombre, nowIso) {
 
 function str_(v) { return v == null ? "" : String(v); }
 
+// One-time authorization helper. After pasting this script, select this
+// function in the Apps Script editor's Run menu and click Run once, then
+// approve the Google Drive prompt. This grants the Drive scope the web app
+// needs to save signature PNGs. Without it, rows still save but firma_url
+// shows a "No tienes permiso para llamar a DriveApp" error.
+function authorizeDrive() {
+  var it = DriveApp.getFoldersByName(CONSENT_FOLDER);
+  var folder = it.hasNext() ? it.next() : DriveApp.createFolder(CONSENT_FOLDER);
+  Logger.log("OK — carpeta de firmas lista: " + folder.getUrl());
+  return folder.getUrl();
+}
+
 function out(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
