@@ -11,6 +11,8 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
         // Public customer portal.
         portal: resolve(__dirname, 'portal.html'),
+        // Public convivencia consent form.
+        consentimiento: resolve(__dirname, 'consentimiento.html'),
       },
     },
   },

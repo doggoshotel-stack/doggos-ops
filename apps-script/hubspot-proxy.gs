@@ -19,6 +19,33 @@ const ROOM_BOARD_COLS = ["reservation", "room", "feed_9", "feed_14", "feed_20", 
 // so a room move never blanks a feed override and vice-versa.
 const ROOM_BOARD_EDITABLE = ["room", "feed_9", "feed_14", "feed_20", "med_note"];
 
+// Signed convivencia consent forms (public /consentimiento page). One row per
+// submission, append-only — nothing here is ever updated in place. The drawn
+// signature is saved as a PNG to a Drive folder and only its link is stored.
+const CONSENT_SHEET = "Consent";
+const CONSENT_FOLDER = "Doggos · Consentimientos (firmas)";
+const CONSENT_COLS = [
+  "timestamp",               // server time the form was received (ISO)
+  "nombre_tutor",            // §1
+  "dni_nie",                 // §1
+  "telefono",                // §1
+  "email",                   // §1
+  "perros",                  // §1 dog name(s)
+  "duermen_juntos",          // §2 Sí / No
+  "duermen_juntos_nombres",  // §2 dog names, if authorised
+  "leido_seccion_2",         // §2 initials → Sí
+  "leido_seccion_3",         // §3 initials → Sí
+  "leido_seccion_4",         // §4 initials → Sí
+  "es_rpp",                  // §3 raza potencialmente peligrosa: Sí / No
+  "contacto_emergencia",     // §5
+  "veterinario_habitual",    // §5
+  "acepta_entorno_natural",  // §6 Sí
+  "consent_datos",           // §7 RGPD Sí
+  "lugar_fecha",             // §10
+  "firma_url",               // Drive link to the signature PNG
+  "user_agent"               // light audit trail
+];
+
 function doGet(e) {
   if (e.parameter.key !== SECRET) return out({ error: "unauthorized" });
   try {
@@ -63,6 +90,10 @@ function doPost(e) {
   // Room board writes are keyed by Mews confirmation number and live in their
   // own tab — routed off before the dog_extras logic so nothing there changes.
   if (body.action === "saveRoomBoard") return saveRoomBoard_(body);
+
+  // Signed consent forms append to their own tab — routed off before the
+  // dog_extras logic so the photo/portal pipeline is untouched.
+  if (body.action === "submitConsent") return submitConsent_(body);
 
   if (!body.dog_id) return out({ error: "missing dog_id" });
 
@@ -158,6 +189,108 @@ function saveRoomBoard_(body) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// Append one signed consent form to the Consent tab. The signature arrives as
+// a base64 PNG data URL; it is written to a Drive folder and only the file link
+// is stored in the sheet (a data URL would blow past the cell size limit).
+// Append-only: a customer re-signing simply adds a new, newer row.
+function submitConsent_(body) {
+  var d = body.data || {};
+
+  // Minimal server-side guard: a real submission always has a signer name and
+  // the three acceptance flags. Prevents empty/garbage rows.
+  var nombre = String(d.nombre_tutor == null ? "" : d.nombre_tutor).trim();
+  if (!nombre) return out({ error: "missing nombre_tutor" });
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(CONSENT_SHEET);
+    if (!sheet) {
+      sheet = ss.insertSheet(CONSENT_SHEET);
+      sheet.getRange(1, 1, 1, CONSENT_COLS.length).setValues([CONSENT_COLS]);
+      sheet.setFrozenRows(1);
+    } else if (sheet.getLastRow() < 1) {
+      sheet.getRange(1, 1, 1, CONSENT_COLS.length).setValues([CONSENT_COLS]);
+      sheet.setFrozenRows(1);
+    }
+
+    var nowIso = new Date().toISOString();
+
+    // Persist the drawn signature to Drive, if present.
+    var firmaUrl = "";
+    if (d.firma_png) {
+      try { firmaUrl = saveSignature_(d.firma_png, nombre, nowIso); }
+      catch (sigErr) { firmaUrl = "ERROR: " + sigErr; }
+    }
+
+    // Build the row in the fixed CONSENT_COLS order.
+    var record = {
+      timestamp: nowIso,
+      nombre_tutor: nombre,
+      dni_nie: str_(d.dni_nie),
+      telefono: str_(d.telefono),
+      email: str_(d.email),
+      perros: str_(d.perros),
+      duermen_juntos: str_(d.duermen_juntos),
+      duermen_juntos_nombres: str_(d.duermen_juntos_nombres),
+      leido_seccion_2: str_(d.leido_seccion_2),
+      leido_seccion_3: str_(d.leido_seccion_3),
+      leido_seccion_4: str_(d.leido_seccion_4),
+      es_rpp: str_(d.es_rpp),
+      contacto_emergencia: str_(d.contacto_emergencia),
+      veterinario_habitual: str_(d.veterinario_habitual),
+      acepta_entorno_natural: str_(d.acepta_entorno_natural),
+      consent_datos: str_(d.consent_datos),
+      lugar_fecha: str_(d.lugar_fecha),
+      firma_url: firmaUrl,
+      user_agent: str_(d.user_agent)
+    };
+    var row = CONSENT_COLS.map(function (c) { return record[c] != null ? record[c] : ""; });
+    sheet.appendRow(row);
+
+    return out({ ok: true, timestamp: nowIso, firma_url: firmaUrl });
+  } catch (err) {
+    return out({ error: err.toString() });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Decode a "data:image/png;base64,..." string, store it in the consent Drive
+// folder (created on first use), and return a shareable link.
+function saveSignature_(dataUrl, nombre, nowIso) {
+  var m = /^data:(image\/[\w+.-]+);base64,(.+)$/.exec(String(dataUrl));
+  if (!m) throw new Error("firma no es un data URL válido");
+
+  var folder;
+  var it = DriveApp.getFoldersByName(CONSENT_FOLDER);
+  folder = it.hasNext() ? it.next() : DriveApp.createFolder(CONSENT_FOLDER);
+
+  var safeName = String(nombre).replace(/[^\p{L}\p{N} _-]/gu, "").trim().slice(0, 60) || "firma";
+  var stamp = nowIso.replace(/[:.]/g, "-");
+  var fileName = "firma_" + safeName.replace(/\s+/g, "_") + "_" + stamp + ".png";
+
+  var blob = Utilities.newBlob(Utilities.base64Decode(m[2]), m[1], fileName);
+  var file = folder.createFile(blob);
+  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
+  return file.getUrl();
+}
+
+function str_(v) { return v == null ? "" : String(v); }
+
+// One-time authorization helper. After pasting this script, select this
+// function in the Apps Script editor's Run menu and click Run once, then
+// approve the Google Drive prompt. This grants the Drive scope the web app
+// needs to save signature PNGs. Without it, rows still save but firma_url
+// shows a "No tienes permiso para llamar a DriveApp" error.
+function authorizeDrive() {
+  var it = DriveApp.getFoldersByName(CONSENT_FOLDER);
+  var folder = it.hasNext() ? it.next() : DriveApp.createFolder(CONSENT_FOLDER);
+  Logger.log("OK — carpeta de firmas lista: " + folder.getUrl());
+  return folder.getUrl();
 }
 
 function out(obj) {
