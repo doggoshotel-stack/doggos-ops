@@ -1,5 +1,6 @@
 import ManagementLogin, { checkMgmtAuth, clearMgmtAuth } from './Login.jsx';
 import PnL from './PnL.jsx';
+import Budget from './Budget.jsx';
 import Customers from './Customers.jsx';
 import Seo from './Seo.jsx';
 
@@ -15,6 +16,7 @@ const C = {
 const MGMT_ROUTES = [
   { hash: '#/management',          label: 'P&L anual 2026',    comp: 'pnl' },
   { hash: '#/management/pnl-2025', label: 'P&L 2025',          comp: 'pnl2025' },
+  { hash: '#/management/budget-2027', label: 'Presupuesto 2027', comp: 'budget2027' },
   { hash: '#/management/customers',label: 'Análisis clientes', comp: 'customers' },
   { hash: '#/management/seo',      label: 'SEO & Ads',         comp: 'seo' },
   // Pickup & pace / Forecast / Mews sync hidden for now (placeholders). The
@@ -24,7 +26,7 @@ const MGMT_ROUTES = [
 
 export const MGMT_NAV = MGMT_ROUTES;
 
-export default function ManagementRouter({ route, reservations, reservations2025, capacity, now, seoData, seoError }) {
+export default function ManagementRouter({ route, reservations, reservations2025, capacity, now, seoData, seoError, hubspotUrl, hubspotKey }) {
   const sub = MGMT_ROUTES.find(r => r.hash === route)?.comp || 'pnl';
 
   if (sub === 'pnl') {
@@ -34,6 +36,22 @@ export default function ManagementRouter({ route, reservations, reservations2025
   if (sub === 'pnl2025') {
     // 2025 lives in its own Mews tab (12-month export limit), passed separately.
     return <PnL reservations={reservations2025 || []} capacity={capacity} now={now} year={2025} />;
+  }
+
+  if (sub === 'budget2027') {
+    // Budget drivers are seeded from the live years, so it gets both Mews
+    // feeds; the HubSpot bridge credentials are what persist it to the sheet.
+    return (
+      <Budget
+        year={2027}
+        reservations={reservations}
+        reservations2025={reservations2025 || []}
+        capacity={capacity}
+        now={now}
+        hubspotUrl={hubspotUrl}
+        hubspotKey={hubspotKey}
+      />
+    );
   }
 
   if (sub === 'customers') {

@@ -19,6 +19,16 @@ const ROOM_BOARD_COLS = ["reservation", "room", "feed_9", "feed_14", "feed_20", 
 // so a room move never blanks a feed override and vice-versa.
 const ROOM_BOARD_EDITABLE = ["room", "feed_9", "feed_14", "feed_20", "med_note"];
 
+// Annual budget (Management → Presupuesto). One flat row per budget line so
+// the tab stays readable and editable in Sheets itself. Written as a whole-year
+// replace: the budget is edited as one document in the dashboard, and renaming
+// or deleting a line has to survive the round trip. Other years are untouched.
+const BUDGET_SHEET = "budget";
+const BUDGET_MONTHS = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+const BUDGET_COLS = ["year", "type", "section_id", "section_label", "line_id", "line_label"]
+  .concat(BUDGET_MONTHS)
+  .concat(["updated_at"]);
+
 // Signed convivencia consent forms (public /consentimiento page). One row per
 // submission, append-only — nothing here is ever updated in place. The drawn
 // signature is saved as a PNG to a Drive folder and only its link is stored.
@@ -94,6 +104,9 @@ function doPost(e) {
   // Signed consent forms append to their own tab — routed off before the
   // dog_extras logic so the photo/portal pipeline is untouched.
   if (body.action === "submitConsent") return submitConsent_(body);
+
+  // Budget writes live in their own tab, keyed by year.
+  if (body.action === "saveBudget") return saveBudget_(body);
 
   if (!body.dog_id) return out({ error: "missing dog_id" });
 
@@ -184,6 +197,75 @@ function saveRoomBoard_(body) {
     }
     if (colIdx.updated_at != null) sheet.getRange(rowIndex, colIdx.updated_at + 1).setValue(nowIso);
     return out({ ok: true, reservation: reservation });
+  } catch (err) {
+    return out({ error: err.toString() });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Replace every budget row for one year. Rows for other years are read back
+// and rewritten untouched, so the tab can hold 2027, 2028, … side by side.
+// Nothing here is an upsert: the dashboard always sends the complete year.
+function saveBudget_(body) {
+  var year = String(body.year == null ? "" : body.year).trim();
+  if (!year) return out({ error: "missing year" });
+  var rows = body.rows;
+  if (!rows || !rows.length) return out({ error: "missing rows" });
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(BUDGET_SHEET);
+    if (!sheet) {
+      sheet = ss.insertSheet(BUDGET_SHEET);
+      sheet.getRange(1, 1, 1, BUDGET_COLS.length).setValues([BUDGET_COLS]);
+      sheet.setFrozenRows(1);
+    }
+
+    // Keep whatever belongs to other years, in the column order we control.
+    var existing = sheet.getLastRow() > 1 ? sheet.getDataRange().getValues() : [];
+    var keep = [];
+    if (existing.length > 1) {
+      var headers = existing[0].map(function (h) { return String(h).trim(); });
+      var idx = {};
+      for (var c = 0; c < headers.length; c++) idx[headers[c]] = c;
+      for (var r = 1; r < existing.length; r++) {
+        var rowYear = idx.year != null ? String(existing[r][idx.year]).trim() : "";
+        if (!rowYear || rowYear === year) continue;
+        keep.push(BUDGET_COLS.map(function (col) {
+          return idx[col] != null ? existing[r][idx[col]] : "";
+        }));
+      }
+    }
+
+    var nowIso = new Date().toISOString();
+    var fresh = rows.map(function (row) {
+      var vals = row.values || [];
+      var rec = [
+        year,
+        str_(row.type),
+        str_(row.section_id),
+        str_(row.section_label),
+        str_(row.line_id),
+        str_(row.line_label)
+      ];
+      for (var m = 0; m < 12; m++) {
+        var v = Number(vals[m]);
+        rec.push(isNaN(v) ? 0 : v);
+      }
+      rec.push(nowIso);
+      return rec;
+    });
+
+    var all = keep.concat(fresh);
+    sheet.clear();
+    sheet.getRange(1, 1, 1, BUDGET_COLS.length).setValues([BUDGET_COLS]);
+    sheet.setFrozenRows(1);
+    if (all.length) sheet.getRange(2, 1, all.length, BUDGET_COLS.length).setValues(all);
+
+    return out({ ok: true, year: year, rows: fresh.length, updated_at: nowIso });
   } catch (err) {
     return out({ error: err.toString() });
   } finally {
