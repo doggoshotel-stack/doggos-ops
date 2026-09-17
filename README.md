@@ -147,6 +147,45 @@ git push
 
 ---
 
+## Presupuesto anual (Management → Presupuesto 2027)
+
+A driver-based budget: you set occupancy % and ADR per month, and the
+`Alojamiento` revenue line is computed (`plazas × días × ocupación × ADR`).
+Everything else — extra revenue lines and every expense block — is typed in
+euros per month. `→12` copies January across the year (for fixed costs), line
+and block names are editable, and `+ añadir` creates new ones. The page shows
+section subtotals, total revenue, total opex, EBITDA, EBITDA margin and EBIT.
+
+"Sembrar desde histórico" fills the twelve occupancy/ADR pairs from real closed
+months — the same month of the current year if it has closed, else the same
+month a year earlier, else the average of what exists — then applies your
+occupancy (pp) and ADR (%) increments.
+
+**Storage.** The budget lives in the `Budget` tab of the HubSpot sheet, written
+through the same Apps Script proxy as `dog_extras` / `room_board` / `Consent`,
+so it is shared across devices rather than stuck in one browser. One flat row
+per line (`year | type | section_id | section_label | line_id | line_label |
+ene…dic | updated_at`), readable and editable in Sheets directly. A save is a
+whole-year replace; other years in the tab are left untouched. Nothing
+autosaves — press **Guardar**.
+
+> **Deploy step:** `apps-script/hubspot-proxy.gs` gained a `saveBudget` action.
+> Paste the updated script into the Apps Script editor and **redeploy the web
+> app** (Deploy → Manage deployments → edit → New version). Until you do, the
+> old script does not know the action and the page reports
+> `No se pudo guardar: Apps Script: missing dog_id` — that error means "you
+> forgot to redeploy", not a data problem.
+
+Tab naming is resolved case-insensitively (`Budget` and `budget` are the same
+tab), and the tab is created automatically if it does not exist. A save
+rewrites the whole tab, so it refuses to run when the tab holds content with
+columns this script did not write — you get
+`La pestaña "Budget" ya tiene contenido con otras columnas (…)` instead of an
+erased spreadsheet. Empty the tab (or rename it and leave an empty `Budget`)
+and save again.
+
+---
+
 ## Security notes
 
 - The password gate is client-side. It stops casual passersby but not someone determined enough to inspect the JS bundle. For an internal ops display this is fine. If you later want stronger auth (e.g. SSO with Google Workspace), switch to Cloudflare Access on a custom domain.

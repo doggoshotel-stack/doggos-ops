@@ -3697,6 +3697,8 @@ export default function App() {
         now={now}
         seoData={seoData}
         seoError={fetchErrors.seo}
+        hubspotUrl={config.hubspotUrl}
+        hubspotKey={config.hubspotKey}
       />
     );
   } else if (route === '#/clients' || route.startsWith('#/clients/')) {

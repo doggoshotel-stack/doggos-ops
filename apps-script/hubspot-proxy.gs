@@ -19,6 +19,16 @@ const ROOM_BOARD_COLS = ["reservation", "room", "feed_9", "feed_14", "feed_20", 
 // so a room move never blanks a feed override and vice-versa.
 const ROOM_BOARD_EDITABLE = ["room", "feed_9", "feed_14", "feed_20", "med_note"];
 
+// Annual budget (Management → Presupuesto). One flat row per budget line so
+// the tab stays readable and editable in Sheets itself. Written as a whole-year
+// replace: the budget is edited as one document in the dashboard, and renaming
+// or deleting a line has to survive the round trip. Other years are untouched.
+const BUDGET_SHEET = "Budget";
+const BUDGET_MONTHS = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+const BUDGET_COLS = ["year", "type", "section_id", "section_label", "line_id", "line_label"]
+  .concat(BUDGET_MONTHS)
+  .concat(["updated_at"]);
+
 // Signed convivencia consent forms (public /consentimiento page). One row per
 // submission, append-only — nothing here is ever updated in place. The drawn
 // signature is saved as a PNG to a Drive folder and only its link is stored.
@@ -51,7 +61,7 @@ function doGet(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var name = e.parameter.sheet || DEFAULT_SHEET;
-    var sheet = name ? ss.getSheetByName(name) : ss.getSheets()[0];
+    var sheet = name ? sheetByName_(ss, name) : ss.getSheets()[0];
     if (!sheet) return out([]);
     var data = sheet.getDataRange().getValues();
     if (data.length < 2) return out([]);
@@ -94,6 +104,9 @@ function doPost(e) {
   // Signed consent forms append to their own tab — routed off before the
   // dog_extras logic so the photo/portal pipeline is untouched.
   if (body.action === "submitConsent") return submitConsent_(body);
+
+  // Budget writes live in their own tab, keyed by year.
+  if (body.action === "saveBudget") return saveBudget_(body);
 
   if (!body.dog_id) return out({ error: "missing dog_id" });
 
@@ -191,6 +204,102 @@ function saveRoomBoard_(body) {
   }
 }
 
+// Returns an error string when the Budget tab holds content this script did
+// not write, and "" when it is safe to rewrite. Safe means: empty, or carrying
+// our own header row (year | type | … | line_id | …).
+function budgetTabConflict_(sheet) {
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 1 || lastCol < 1) return "";   // empty tab — fine
+
+  var header = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) {
+    return String(h).trim().toLowerCase();
+  });
+  if (header.join("") === "" && lastRow === 1) return "";  // blank first row only
+
+  var ours = header[0] === "year" && header[1] === "type" && header.indexOf("line_id") !== -1;
+  if (ours) return "";
+
+  return "La pestaña \"" + sheet.getName() + "\" ya tiene contenido con otras columnas (" +
+         header.slice(0, 4).join(", ") + "…). Guardar la sobrescribiría entera. " +
+         "Vacíala (o renómbrala y deja una Budget vacía) y vuelve a guardar.";
+}
+
+// Replace every budget row for one year. Rows for other years are read back
+// and rewritten untouched, so the tab can hold 2027, 2028, … side by side.
+// Nothing here is an upsert: the dashboard always sends the complete year.
+function saveBudget_(body) {
+  var year = String(body.year == null ? "" : body.year).trim();
+  if (!year) return out({ error: "missing year" });
+  var rows = body.rows;
+  if (!rows || !rows.length) return out({ error: "missing rows" });
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = sheetByName_(ss, BUDGET_SHEET);
+    if (!sheet) {
+      sheet = ss.insertSheet(BUDGET_SHEET);
+      sheet.getRange(1, 1, 1, BUDGET_COLS.length).setValues([BUDGET_COLS]);
+      sheet.setFrozenRows(1);
+    }
+
+    // A save rewrites the whole tab, so refuse to touch one holding something
+    // that is not this budget's schema — a hand-built budget, notes, anything.
+    // Better a clear error than a silently erased spreadsheet.
+    var guard = budgetTabConflict_(sheet);
+    if (guard) return out({ error: guard });
+
+    // Keep whatever belongs to other years, in the column order we control.
+    var existing = sheet.getLastRow() > 1 ? sheet.getDataRange().getValues() : [];
+    var keep = [];
+    if (existing.length > 1) {
+      var headers = existing[0].map(function (h) { return String(h).trim(); });
+      var idx = {};
+      for (var c = 0; c < headers.length; c++) idx[headers[c]] = c;
+      for (var r = 1; r < existing.length; r++) {
+        var rowYear = idx.year != null ? String(existing[r][idx.year]).trim() : "";
+        if (!rowYear || rowYear === year) continue;
+        keep.push(BUDGET_COLS.map(function (col) {
+          return idx[col] != null ? existing[r][idx[col]] : "";
+        }));
+      }
+    }
+
+    var nowIso = new Date().toISOString();
+    var fresh = rows.map(function (row) {
+      var vals = row.values || [];
+      var rec = [
+        year,
+        str_(row.type),
+        str_(row.section_id),
+        str_(row.section_label),
+        str_(row.line_id),
+        str_(row.line_label)
+      ];
+      for (var m = 0; m < 12; m++) {
+        var v = Number(vals[m]);
+        rec.push(isNaN(v) ? 0 : v);
+      }
+      rec.push(nowIso);
+      return rec;
+    });
+
+    var all = keep.concat(fresh);
+    sheet.clear();
+    sheet.getRange(1, 1, 1, BUDGET_COLS.length).setValues([BUDGET_COLS]);
+    sheet.setFrozenRows(1);
+    if (all.length) sheet.getRange(2, 1, all.length, BUDGET_COLS.length).setValues(all);
+
+    return out({ ok: true, year: year, rows: fresh.length, updated_at: nowIso });
+  } catch (err) {
+    return out({ error: err.toString() });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // Append one signed consent form to the Consent tab. The signature arrives as
 // a base64 PNG data URL; it is written to a Drive folder and only the file link
 // is stored in the sheet (a data URL would blow past the cell size limit).
@@ -280,6 +389,22 @@ function saveSignature_(dataUrl, nombre, nowIso) {
 }
 
 function str_(v) { return v == null ? "" : String(v); }
+
+// Tab lookup that tolerates capitalisation. getSheetByName is case-sensitive,
+// so a tab someone created as "Budget" would be invisible to a lookup for
+// "budget" — and the write path would then helpfully create a SECOND tab next
+// to it. Exact match wins; otherwise fall back to a case-insensitive scan.
+function sheetByName_(ss, name) {
+  if (!name) return null;
+  var exact = ss.getSheetByName(name);
+  if (exact) return exact;
+  var target = String(name).trim().toLowerCase();
+  var all = ss.getSheets();
+  for (var i = 0; i < all.length; i++) {
+    if (String(all[i].getName()).trim().toLowerCase() === target) return all[i];
+  }
+  return null;
+}
 
 // One-time authorization helper. After pasting this script, select this
 // function in the Apps Script editor's Run menu and click Run once, then
