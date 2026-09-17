@@ -1,7 +1,10 @@
-// Budget persistence. The budget lives in a `budget` tab of the same HubSpot
+// Budget persistence. The budget lives in the `Budget` tab of the same HubSpot
 // sheet the rest of the dashboard already reads, served by the same Apps Script
 // proxy (`apps-script/hubspot-proxy.gs`). Shared across devices — unlike the
 // localStorage config, a budget typed on the laptop shows up on the iPad.
+//
+// The proxy resolves tab names case-insensitively, so "Budget" and "budget"
+// both land on the same tab rather than quietly creating a second one.
 //
 // Wire format is one flat row per line so the tab stays readable/editable in
 // Google Sheets itself:
@@ -9,6 +12,7 @@
 //
 // type is one of: driver | revenue | expense
 
+export const BUDGET_TAB = 'Budget';
 export const MONTH_COLS = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 
 function endpoint(url, params) {
@@ -29,7 +33,7 @@ function num(v) {
  */
 export async function fetchBudget(url, key, year) {
   if (!url) throw new Error('Falta la URL del bridge de HubSpot (configúrala en admin).');
-  const res = await fetch(endpoint(url, { key: key || '', sheet: 'budget' }), { redirect: 'follow' });
+  const res = await fetch(endpoint(url, { key: key || '', sheet: BUDGET_TAB }), { redirect: 'follow' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   let data;
   try { data = await res.json(); }

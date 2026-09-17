@@ -23,7 +23,7 @@ const ROOM_BOARD_EDITABLE = ["room", "feed_9", "feed_14", "feed_20", "med_note"]
 // the tab stays readable and editable in Sheets itself. Written as a whole-year
 // replace: the budget is edited as one document in the dashboard, and renaming
 // or deleting a line has to survive the round trip. Other years are untouched.
-const BUDGET_SHEET = "budget";
+const BUDGET_SHEET = "Budget";
 const BUDGET_MONTHS = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
 const BUDGET_COLS = ["year", "type", "section_id", "section_label", "line_id", "line_label"]
   .concat(BUDGET_MONTHS)
@@ -61,7 +61,7 @@ function doGet(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var name = e.parameter.sheet || DEFAULT_SHEET;
-    var sheet = name ? ss.getSheetByName(name) : ss.getSheets()[0];
+    var sheet = name ? sheetByName_(ss, name) : ss.getSheets()[0];
     if (!sheet) return out([]);
     var data = sheet.getDataRange().getValues();
     if (data.length < 2) return out([]);
@@ -204,6 +204,27 @@ function saveRoomBoard_(body) {
   }
 }
 
+// Returns an error string when the Budget tab holds content this script did
+// not write, and "" when it is safe to rewrite. Safe means: empty, or carrying
+// our own header row (year | type | … | line_id | …).
+function budgetTabConflict_(sheet) {
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 1 || lastCol < 1) return "";   // empty tab — fine
+
+  var header = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) {
+    return String(h).trim().toLowerCase();
+  });
+  if (header.join("") === "" && lastRow === 1) return "";  // blank first row only
+
+  var ours = header[0] === "year" && header[1] === "type" && header.indexOf("line_id") !== -1;
+  if (ours) return "";
+
+  return "La pestaña \"" + sheet.getName() + "\" ya tiene contenido con otras columnas (" +
+         header.slice(0, 4).join(", ") + "…). Guardar la sobrescribiría entera. " +
+         "Vacíala (o renómbrala y deja una Budget vacía) y vuelve a guardar.";
+}
+
 // Replace every budget row for one year. Rows for other years are read back
 // and rewritten untouched, so the tab can hold 2027, 2028, … side by side.
 // Nothing here is an upsert: the dashboard always sends the complete year.
@@ -217,12 +238,18 @@ function saveBudget_(body) {
   lock.waitLock(20000);
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheet = ss.getSheetByName(BUDGET_SHEET);
+    var sheet = sheetByName_(ss, BUDGET_SHEET);
     if (!sheet) {
       sheet = ss.insertSheet(BUDGET_SHEET);
       sheet.getRange(1, 1, 1, BUDGET_COLS.length).setValues([BUDGET_COLS]);
       sheet.setFrozenRows(1);
     }
+
+    // A save rewrites the whole tab, so refuse to touch one holding something
+    // that is not this budget's schema — a hand-built budget, notes, anything.
+    // Better a clear error than a silently erased spreadsheet.
+    var guard = budgetTabConflict_(sheet);
+    if (guard) return out({ error: guard });
 
     // Keep whatever belongs to other years, in the column order we control.
     var existing = sheet.getLastRow() > 1 ? sheet.getDataRange().getValues() : [];
@@ -362,6 +389,22 @@ function saveSignature_(dataUrl, nombre, nowIso) {
 }
 
 function str_(v) { return v == null ? "" : String(v); }
+
+// Tab lookup that tolerates capitalisation. getSheetByName is case-sensitive,
+// so a tab someone created as "Budget" would be invisible to a lookup for
+// "budget" — and the write path would then helpfully create a SECOND tab next
+// to it. Exact match wins; otherwise fall back to a case-insensitive scan.
+function sheetByName_(ss, name) {
+  if (!name) return null;
+  var exact = ss.getSheetByName(name);
+  if (exact) return exact;
+  var target = String(name).trim().toLowerCase();
+  var all = ss.getSheets();
+  for (var i = 0; i < all.length; i++) {
+    if (String(all[i].getName()).trim().toLowerCase() === target) return all[i];
+  }
+  return null;
+}
 
 // One-time authorization helper. After pasting this script, select this
 // function in the Apps Script editor's Run menu and click Run once, then

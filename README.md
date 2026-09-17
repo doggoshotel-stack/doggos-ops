@@ -161,7 +161,7 @@ months — the same month of the current year if it has closed, else the same
 month a year earlier, else the average of what exists — then applies your
 occupancy (pp) and ADR (%) increments.
 
-**Storage.** The budget lives in a `budget` tab of the HubSpot sheet, written
+**Storage.** The budget lives in the `Budget` tab of the HubSpot sheet, written
 through the same Apps Script proxy as `dog_extras` / `room_board` / `Consent`,
 so it is shared across devices rather than stuck in one browser. One flat row
 per line (`year | type | section_id | section_label | line_id | line_label |
@@ -174,8 +174,15 @@ autosaves — press **Guardar**.
 > app** (Deploy → Manage deployments → edit → New version). Until you do, the
 > old script does not know the action and the page reports
 > `No se pudo guardar: Apps Script: missing dog_id` — that error means "you
-> forgot to redeploy", not a data problem. The `budget` tab is created
-> automatically on the first save; no manual setup needed.
+> forgot to redeploy", not a data problem.
+
+Tab naming is resolved case-insensitively (`Budget` and `budget` are the same
+tab), and the tab is created automatically if it does not exist. A save
+rewrites the whole tab, so it refuses to run when the tab holds content with
+columns this script did not write — you get
+`La pestaña "Budget" ya tiene contenido con otras columnas (…)` instead of an
+erased spreadsheet. Empty the tab (or rename it and leave an empty `Budget`)
+and save again.
 
 ---
 
