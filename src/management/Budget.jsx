@@ -18,6 +18,16 @@ const MONTHS_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','
 const zeros = () => Array(12).fill(0);
 const daysInMonth = (year, m) => new Date(year, m + 1, 0).getDate();
 
+// Revenue is budgeted in gross euros — the price the customer pays, IVA
+// included — because that is the number anyone quoting a stay thinks in.
+// Only the net part is revenue: the IVA is collected on behalf of Hacienda.
+// Extracting it from a gross amount is a division, not a subtraction:
+//   neto = bruto / 1,21     (100 € brutos → 82,64 € netos)
+//   iva  = bruto − neto     (100 € brutos → 17,36 €, i.e. 17,36% of gross)
+// Subtracting 21% of the gross instead would understate revenue by ~4%.
+const IVA_PCT = 21;
+const netOf = (gross) => gross / (1 + IVA_PCT / 100);
+
 /* ------------------------------------------------------------------ *
  * Default skeleton — used the first time the budget is opened (or any
  * time the `budget` tab holds nothing for the year). Every label is
@@ -310,7 +320,11 @@ export default function Budget({
 
     const revenueExtra = Array.from({ length: 12 }, (_, m) =>
       state.revenue.reduce((s, l) => s + (l.values[m] || 0), 0));
-    const revenueTotal = lodging.map((v, m) => v + revenueExtra[m]);
+    // Gross = what is typed in (IVA included). Net = what actually counts as
+    // revenue, and what every margin below is measured against.
+    const revenueGross = lodging.map((v, m) => v + revenueExtra[m]);
+    const revenueNet = revenueGross.map(netOf);
+    const iva = revenueGross.map((v, m) => v - revenueNet[m]);
 
     const sectionTotals = state.sections.map((s) =>
       Array.from({ length: 12 }, (_, m) => s.lines.reduce((acc, l) => acc + (l.values[m] || 0), 0)));
@@ -320,16 +334,18 @@ export default function Budget({
     const amort = Array.from({ length: 12 }, (_, m) =>
       state.sections.reduce((acc, s, i) => acc + (s.kind === 'amort' ? sectionTotals[i][m] : 0), 0));
 
-    const ebitda = revenueTotal.map((v, m) => v - opex[m]);
+    const ebitda = revenueNet.map((v, m) => v - opex[m]);
     const ebit = ebitda.map((v, m) => v - amort[m]);
-    const margin = revenueTotal.map((v, m) => (v > 0 ? ebitda[m] / v : null));
+    const margin = revenueNet.map((v, m) => (v > 0 ? ebitda[m] / v : null));
 
     const sum = (arr) => arr.reduce((a, b) => a + b, 0);
     const fy = {
       avail: sum(avail),
       roomNights: sum(roomNights),
       lodging: sum(lodging),
-      revenueTotal: sum(revenueTotal),
+      revenueGross: sum(revenueGross),
+      revenueNet:   sum(revenueNet),
+      iva:          sum(iva),
       opex: sum(opex),
       amort: sum(amort),
       ebitda: sum(ebitda),
@@ -337,14 +353,17 @@ export default function Budget({
     };
     fy.occ = fy.avail > 0 ? fy.roomNights / fy.avail : 0;
     fy.adr = fy.roomNights > 0 ? fy.lodging / fy.roomNights : 0;
-    fy.revpar = fy.avail > 0 ? fy.revenueTotal / fy.avail : 0;
-    fy.margin = fy.revenueTotal > 0 ? fy.ebitda / fy.revenueTotal : null;
+    fy.revpar = fy.avail > 0 ? fy.revenueNet / fy.avail : 0;
+    fy.margin = fy.revenueNet > 0 ? fy.ebitda / fy.revenueNet : null;
 
-    return { avail, roomNights, lodging, revenueExtra, revenueTotal, sectionTotals, opex, amort, ebitda, ebit, margin, fy };
+    return { avail, roomNights, lodging, revenueExtra, revenueGross, revenueNet, iva, sectionTotals, opex, amort, ebitda, ebit, margin, fy };
   }, [state, capacity, year]);
 
+  // Mews totals are what the customer paid, i.e. gross, so the year-on-year
+  // comparison is gross against gross. Comparing this year's net to last
+  // year's gross would invent a ~17% drop out of nothing.
   const refRevenue = pnlRef.fy.projected || pnlRef.fy.rooms_revenue || 0;
-  const growthVsRef = refRevenue > 0 ? calc.fy.revenueTotal / refRevenue - 1 : null;
+  const growthVsRef = refRevenue > 0 ? calc.fy.revenueGross / refRevenue - 1 : null;
 
   /* ---- actions ---- */
   const onSave = async () => {
@@ -494,8 +513,8 @@ export default function Budget({
 
       {/* Metric strip */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12, marginBottom: 20 }}>
-        <Metric label={`Ingresos ${year}`} value={fmtEUR(calc.fy.revenueTotal, { compact: true })}
-          sub={growthVsRef != null ? `${growthVsRef >= 0 ? '+' : ''}${(growthVsRef * 100).toFixed(0)}% vs ${refYear} (proj.)` : null} />
+        <Metric label={`Ingresos netos ${year}`} value={fmtEUR(calc.fy.revenueNet, { compact: true })}
+          sub={`${fmtEUR(calc.fy.revenueGross, { compact: true })} brutos${growthVsRef != null ? ` · ${growthVsRef >= 0 ? '+' : ''}${(growthVsRef * 100).toFixed(0)}% vs ${refYear}` : ''}`} />
         <Metric label="Gastos operativos" value={fmtEUR(calc.fy.opex, { compact: true })} />
         <Metric label="EBITDA" value={fmtEUR(calc.fy.ebitda, { compact: true })} negative={calc.fy.ebitda < 0} />
         <Metric label="Margen EBITDA" value={fmtPct(calc.fy.margin)} negative={(calc.fy.margin ?? 0) < 0} />
@@ -555,7 +574,9 @@ export default function Budget({
               label="+ añadir línea de ingreso"
               onClick={() => mutate((s) => { s.revenue.push({ id: `rev_${Date.now()}`, label: 'Nueva línea', values: zeros() }); return s; })}
             />
-            <CalcRow label="Total ingresos" values={calc.revenueTotal.map((v) => fmtEUR(v, { compact: true }))} fy={fmtEUR(calc.fy.revenueTotal, { compact: true })} bold />
+            <CalcRow label="Total ingresos brutos" values={calc.revenueGross.map((v) => fmtEUR(v, { compact: true }))} fy={fmtEUR(calc.fy.revenueGross, { compact: true })} bold />
+            <CalcRow label={`IVA (${IVA_PCT}%)`} values={calc.iva.map((v) => fmtEUR(-v, { compact: true }))} fy={fmtEUR(-calc.fy.iva, { compact: true })} signed />
+            <CalcRow label="Total ingresos netos" values={calc.revenueNet.map((v) => fmtEUR(v, { compact: true }))} fy={fmtEUR(calc.fy.revenueNet, { compact: true })} sub />
 
             {/* ---------------- Gastos ---------------- */}
             {state.sections.filter((s) => s.kind === 'expense').map((section) => {
@@ -611,7 +632,13 @@ export default function Budget({
         <strong>Alojamiento</strong> es calculado, no se teclea: plazas-noche disponibles ({capacity} × días del mes)
         × ocupación × ADR. El resto de líneas se teclean en euros del mes. El botón <em>→12</em> de cada fila copia
         el valor de enero a los doce meses (útil para costes fijos). Los nombres de línea y de bloque son
-        editables; <em>+ añadir</em> crea líneas o bloques nuevos. EBITDA = ingresos − gastos operativos
+        editables; <em>+ añadir</em> crea líneas o bloques nuevos.{' '}
+        <strong>Los ingresos se presupuestan en bruto</strong> (IVA incluido, el precio que paga el cliente).
+        El neto se obtiene dividiendo entre {(1 + IVA_PCT / 100).toLocaleString('es-ES')} — no restando
+        el {IVA_PCT}%: 100&nbsp;€ brutos son 82,64&nbsp;€ netos y 17,36&nbsp;€ de IVA. EBITDA, margen y
+        RevPAR se calculan <strong>sobre el neto</strong>; la comparativa con {refYear} es bruto contra
+        bruto, porque los importes de Mews también llevan IVA. Los gastos se teclean tal cual: si los
+        anotas con IVA, el EBITDA sale conservador. EBITDA = ingresos netos − gastos operativos
         (amortizaciones aparte, debajo). Los cambios no se guardan solos: pulsa <strong>Guardar</strong> para
         escribir la pestaña <code>budget</code> de la hoja de HubSpot, que es lo que comparten todos los
         dispositivos.
