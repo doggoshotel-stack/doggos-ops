@@ -3371,88 +3371,61 @@ export default function App() {
   }, []);
 
   /* ---- fetch + merge from sources ---- */
-  const refresh = useCallback(async (cfg = config) => {
+  // `full: false` (the 60s auto-refresh tick) skips the slow-changing sources —
+  // the 2025 history and Search Console data — unless they were never loaded.
+  const refresh = useCallback(async (cfg = config, { full = true } = {}) => {
     setRefreshing(true);
     const errors = { hubspot: null, calendly: null, bridge: null, seo: null };
-    let hubspotRows = [];
-    let calendlyRows = [];
-    let bridgeRows = [];
-    let seoPayload = null;
+    const withKey = (base, key, extra = '') =>
+      `${base}${base.includes('?') ? '&' : '?'}key=${encodeURIComponent(key || '')}${extra}`;
+    const fetchBridgeTab = async (sheet) => {
+      const res = await fetch(withKey(cfg.bridgeUrl, cfg.bridgeKey, `&sheet=${sheet}`), { redirect: 'follow' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data?.error) throw new Error(`Apps Script: ${data.error}`);
+      if (!Array.isArray(data?.rows)) throw new Error('Respuesta sin rows');
+      return data.rows.map(parseBridgeRow);
+    };
+    const want2025 = cfg.bridgeUrl && (full || bridge2025.length === 0);
+    const wantSeo = cfg.seoUrl && (full || !seoData);
 
-    if (cfg.hubspotUrl) {
-      try {
-        const raw = await fetchSheet(cfg.hubspotUrl, cfg.hubspotKey);
-        hubspotRows = raw.map(parseHubSpotRow);
-      } catch (e) {
-        errors.hubspot = e.message;
-      }
-    }
-    if (cfg.calendlyUrl) {
-      try {
-        const raw = await fetchSheet(cfg.calendlyUrl, cfg.calendlyKey);
-        calendlyRows = raw.map(parseCalendlyRow);
-      } catch (e) {
-        errors.calendly = e.message;
-      }
-    }
-    if (cfg.bridgeUrl) {
-      try {
-        const url = `${cfg.bridgeUrl}${cfg.bridgeUrl.includes('?') ? '&' : '?'}key=${encodeURIComponent(cfg.bridgeKey || '')}&sheet=reservations`;
-        const res = await fetch(url, { redirect: 'follow' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        if (data?.error) throw new Error(`Apps Script: ${data.error}`);
-        if (!Array.isArray(data?.rows)) throw new Error('Respuesta sin rows');
-        bridgeRows = data.rows.map(parseBridgeRow);
-      } catch (e) {
-        errors.bridge = e.message;
-      }
-    }
+    // Every source is an independent Apps Script call, so fire them all at
+    // once — the refresh takes as long as the slowest one, not the sum.
+    const [hubspotR, calendlyR, bridgeR, bridge2025R, seoR, extrasR, roomR] = await Promise.allSettled([
+      cfg.hubspotUrl ? fetchSheet(cfg.hubspotUrl, cfg.hubspotKey).then((raw) => raw.map(parseHubSpotRow)) : null,
+      cfg.calendlyUrl ? fetchSheet(cfg.calendlyUrl, cfg.calendlyKey).then((raw) => raw.map(parseCalendlyRow)) : null,
+      cfg.bridgeUrl ? fetchBridgeTab('reservations') : null,
+      // Historical 2025 reservations — same bridge, separate "2025" tab.
+      want2025 ? fetchBridgeTab('2025') : null,
+      wantSeo
+        ? fetch(withKey(cfg.seoUrl, cfg.seoKey), { redirect: 'follow' }).then(async (res) => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            if (data?.error) throw new Error(`Apps Script: ${data.error}`);
+            if (!data?.summary) throw new Error('Respuesta sin summary');
+            return data;
+          })
+        : null,
+      cfg.hubspotUrl ? fetchDogExtras(cfg.hubspotUrl, cfg.hubspotKey) : null,
+      cfg.hubspotUrl ? fetchRoomBoard(cfg.hubspotUrl, cfg.hubspotKey) : null,
+    ]);
+    const ok = (r) => (r.status === 'fulfilled' ? r.value : null);
+    const fail = (r) => (r.status === 'rejected' ? r.reason?.message || String(r.reason) : null);
 
-    // Historical 2025 reservations — same bridge, separate "2025" tab. Failure
-    // here must never block the current-year data, so it swallows its own error.
-    let bridge2025Rows = [];
-    if (cfg.bridgeUrl) {
-      try {
-        const url = `${cfg.bridgeUrl}${cfg.bridgeUrl.includes('?') ? '&' : '?'}key=${encodeURIComponent(cfg.bridgeKey || '')}&sheet=2025`;
-        const res = await fetch(url, { redirect: 'follow' });
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data?.rows)) bridge2025Rows = data.rows.map(parseBridgeRow);
-        }
-      } catch {
-        // "2025" tab missing or unreachable — keep whatever we already have
-      }
-    }
-
-    if (cfg.seoUrl) {
-      try {
-        const url = `${cfg.seoUrl}${cfg.seoUrl.includes('?') ? '&' : '?'}key=${encodeURIComponent(cfg.seoKey || '')}`;
-        const res = await fetch(url, { redirect: 'follow' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        if (data?.error) throw new Error(`Apps Script: ${data.error}`);
-        if (!data?.summary) throw new Error('Respuesta sin summary');
-        seoPayload = data;
-      } catch (e) {
-        errors.seo = e.message;
-      }
-    }
-
-    let dogExtrasMap = null;
-    let roomBoardMap = null;
-    if (cfg.hubspotUrl) {
-      try {
-        dogExtrasMap = await fetchDogExtras(cfg.hubspotUrl, cfg.hubspotKey);
-      } catch {
-        // dog_extras tab missing or unreachable — keep whatever we already have
-      }
-      try {
-        roomBoardMap = await fetchRoomBoard(cfg.hubspotUrl, cfg.hubspotKey);
-      } catch {
-        // room_board tab missing or unreachable — keep whatever we already have
-      }
-    }
+    const hubspotRows = ok(hubspotR) || [];
+    const calendlyRows = ok(calendlyR) || [];
+    const bridgeRows = ok(bridgeR) || [];
+    errors.hubspot = fail(hubspotR);
+    errors.calendly = fail(calendlyR);
+    errors.bridge = fail(bridgeR);
+    // 2025 / dog_extras / room_board failures must never block current data —
+    // they swallow their own errors and we keep whatever we already have.
+    const bridge2025Rows = ok(bridge2025R) || [];
+    const seoPayload = ok(seoR);
+    // A skipped SEO fetch keeps the previous error state instead of clearing it.
+    errors.seo = wantSeo ? fail(seoR) : undefined;
+    const dogExtrasMap = ok(extrasR);
+    const roomBoardMap = ok(roomR);
 
     // The Bridge (vista mensual) is the sole reservation source. Operational
     // views use active reservations only (cancellations excluded); the raw
@@ -3470,7 +3443,7 @@ export default function App() {
     if (seoPayload) setSeoData(seoPayload);
     if (dogExtrasMap) setDogExtras(dogExtrasMap);
     if (roomBoardMap && !roomInteractingRef.current) setRoomBoard(roomBoardMap);
-    setFetchErrors(errors);
+    setFetchErrors((prev) => ({ ...errors, seo: errors.seo === undefined ? prev.seo : errors.seo }));
 
     // Save to cache for resilience
     if (mergedRows.length > 0 || pendingRows.length > 0 || hubspotRows.length > 0 || calendlyRows.length > 0 || bridgeRows.length > 0 || seoPayload) {
@@ -3521,7 +3494,7 @@ export default function App() {
     }
 
     setTimeout(() => setRefreshing(false), 500);
-  }, [config, meta, dogExtras, roomBoard, bridge2025]);
+  }, [config, meta, dogExtras, roomBoard, bridge2025, seoData]);
 
   useEffect(() => {
     (async () => {
@@ -3546,7 +3519,7 @@ export default function App() {
     if (!config.hubspotUrl && !config.calendlyUrl && !config.bridgeUrl) return;
     // Skip the tick while staff are mid-move/edit on the room board so an
     // in-flight optimistic change isn't clobbered by server state.
-    const id = setInterval(() => { if (!roomInteractingRef.current) refresh(config); }, 60000);
+    const id = setInterval(() => { if (!roomInteractingRef.current) refresh(config, { full: false }); }, 60000);
     return () => clearInterval(id);
   }, [isAdmin, config, refresh]);
 
