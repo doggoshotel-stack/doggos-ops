@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { storage } from './storage.js';
 import MonthlyView from './MonthlyView.jsx';
+import TeamSchedule from './schedule/TeamSchedule.jsx';
 import ManagementRouter, { ManagementLogin, checkMgmtAuth, clearMgmtAuth, MGMT_NAV } from './management/index.jsx';
 
 /* ============================================================
@@ -1139,6 +1140,14 @@ const NAV_ICON = {
       <circle cx="7" cy="10" r="0.9" fill="currentColor" stroke="none" /><circle cx="13" cy="10" r="0.9" fill="currentColor" stroke="none" />
     </svg>
   ),
+  schedule: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+      <circle cx="7" cy="6" r="2.5" />
+      <path d="M2.5 16.5 C2.5 12.8 4.5 11 7 11 C8.3 11 9.4 11.4 10.2 12.2" />
+      <circle cx="14.5" cy="14" r="3.5" />
+      <path d="M14.5 12.3 L14.5 14 L15.8 14.9" />
+    </svg>
+  ),
   chevronLeft: (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 3 L4 8 L10 13" /></svg>
   ),
@@ -1158,6 +1167,7 @@ const NAV_ITEMS = [
   { hash: '#/transports',      label: 'Transportes',  icon: NAV_ICON.transports },
   { hash: '#/guarderia',       label: 'Guardería/Prueba', icon: NAV_ICON.guarderia },
   { hash: '#/grooming',        label: 'Peluquería',   icon: NAV_ICON.grooming },
+  { hash: '#/horario',         label: 'Horario equipo', icon: NAV_ICON.schedule },
 ];
 
 function Sidebar({ route, collapsed, onToggle, isManagement, onLogout }) {
@@ -3700,7 +3710,19 @@ export default function App() {
         routeBody = <RoomsView merged={merged} roomBoard={roomBoard} onSaveRoom={saveRoomEntry} onInteractingChange={(v) => { roomInteractingRef.current = v; }} />;
         break;
       case '#/mensual':
-        routeBody = <MonthlyView reservations={bridgeReservations} capacity={meta.capacity} now={now} error={fetchErrors.bridge} configured={!!config.bridgeUrl} />;
+        routeBody = <MonthlyView reservations={bridgeReservations} capacity={meta.capacity} now={now} error={fetchErrors.bridge} configured={!!config.bridgeUrl} hubspotUrl={config.hubspotUrl} hubspotKey={config.hubspotKey} />;
+        break;
+      case '#/horario':
+        routeBody = (
+          <TeamSchedule
+            reservations={bridgeReservations}
+            capacity={meta.capacity}
+            now={now}
+            hubspotUrl={config.hubspotUrl}
+            hubspotKey={config.hubspotKey}
+            bridgeError={fetchErrors.bridge}
+          />
+        );
         break;
       case '#/transports':
         routeBody = <TransportsView merged={merged} now={now} />;
