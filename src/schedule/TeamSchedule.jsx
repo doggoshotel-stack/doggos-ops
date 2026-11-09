@@ -227,6 +227,8 @@ export default function TeamSchedule({ reservations = [], capacity = 42, now = n
                   todayKey={todayKey}
                   getShift={getShift}
                   writeShifts={sch.writeShifts}
+                  onPrevMonth={() => setCursor(new Date(year, month - 1, 1))}
+                  onNextMonth={() => setCursor(new Date(year, month + 1, 1))}
                   onEdit={(date) => setEditing({ date, member: m })}
                   onRemove={() => removeMember(m)}
                   disabled={!hubspotUrl}
@@ -323,7 +325,8 @@ export default function TeamSchedule({ reservations = [], capacity = 42, now = n
 
 /* ----------------------- One person's month ----------------------- */
 
-function PersonPanel({ member, year, month, monthDays, stats, todayKey, getShift, writeShifts, onEdit, onRemove, disabled }) {
+function PersonPanel({ member, year, month, monthDays, stats, todayKey, getShift, writeShifts, onPrevMonth, onNextMonth, onEdit, onRemove, disabled }) {
+  const mes = MONTH_NAMES_ES[month];
   const [selected, setSelected] = useState(() => new Set());
   const [kind, setKind] = useState('turno');
   const [start, setStart] = useState(PRESETS[0].start);
@@ -363,7 +366,21 @@ function PersonPanel({ member, year, month, monthDays, stats, todayKey, getShift
     <div className="ts-panel">
       {/* Left: calendar to pick days */}
       <div>
-        <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6, marginBottom: 8 }}>1 · Elige los días</div>
+        {/* The month this panel edits — every day is saved to this month only. */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: C.ink, color: C.cream, borderRadius: 12, padding: '6px 6px', marginBottom: 6 }}>
+          <button type="button" onClick={onPrevMonth} aria-label="Mes anterior" style={{ background: 'none', border: 'none', color: C.cream, cursor: 'pointer', padding: '6px 10px' }}>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 3 L4 8 L10 13" /></svg>
+          </button>
+          <span className="display" style={{ fontSize: 22, lineHeight: 1, color: C.amarillo, textTransform: 'capitalize' }}>{mes} {year}</span>
+          <button type="button" onClick={onNextMonth} aria-label="Mes siguiente" style={{ background: 'none', border: 'none', color: C.cream, cursor: 'pointer', padding: '6px 10px' }}>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 3 L12 8 L6 13" /></svg>
+          </button>
+        </div>
+        <div style={{ fontSize: 11, opacity: 0.65, marginBottom: 14 }}>
+          Los días se guardan solo para {mes}. Cada mes se rellena aparte: cambia de mes con las flechas.
+        </div>
+
+        <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6, marginBottom: 8 }}>1 · Elige tus días de {mes}</div>
         <div className="ts-mini-grid" style={{ marginBottom: 4 }}>
           {WEEKDAYS_MON_FIRST.map((w) => <div key={w} style={{ fontSize: 9, letterSpacing: '0.12em', textAlign: 'center', opacity: 0.55 }}>{w}</div>)}
         </div>
@@ -392,7 +409,7 @@ function PersonPanel({ member, year, month, monthDays, stats, todayKey, getShift
           })}
         </div>
         <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', fontSize: 12 }}>
-          <button type="button" className="pastilla outline" style={{ cursor: 'pointer' }} onClick={selectWeekdays}>Lun–Vie del mes</button>
+          <button type="button" className="pastilla outline" style={{ cursor: 'pointer' }} onClick={selectWeekdays}>Marcar todos los lun–vie de {mes}</button>
           {selected.size > 0 && <button type="button" className="pastilla outline" style={{ cursor: 'pointer' }} onClick={() => setSelected(new Set())}>Quitar selección</button>}
         </div>
 
@@ -421,7 +438,7 @@ function PersonPanel({ member, year, month, monthDays, stats, todayKey, getShift
         )}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn sm" disabled={disabled || selected.size === 0 || !validTimes} onClick={() => apply(newShift())}>
-            Guardar {selected.size || ''} {selected.size === 1 ? 'día' : 'días'}
+            Guardar {selected.size || ''} {selected.size === 1 ? 'día' : 'días'} de {mes}
           </button>
           <button className="btn danger sm" disabled={disabled || selected.size === 0} onClick={() => apply(null)}>Borrar días</button>
         </div>
@@ -429,9 +446,9 @@ function PersonPanel({ member, year, month, monthDays, stats, todayKey, getShift
 
       {/* Right: the lists + totals */}
       <div style={{ minWidth: 0 }}>
-        <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6, marginBottom: 6 }}>Días de trabajo · {work.length}</div>
+        <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6, marginBottom: 6 }}>Días de trabajo en {mes} · {work.length}</div>
         {work.length === 0
-          ? <div style={{ fontSize: 13, opacity: 0.55, marginBottom: 20 }}>Ningún día de trabajo este mes.</div>
+          ? <div style={{ fontSize: 13, opacity: 0.55, marginBottom: 20 }}>Ningún día de trabajo en {mes} todavía.</div>
           : (
             <table className="ts-list" style={{ marginBottom: 22 }}>
               <thead><tr><th>Día</th><th>Horario</th><th>Nota</th><th style={{ textAlign: 'right' }}>Horas</th><th /></tr></thead>
@@ -449,9 +466,9 @@ function PersonPanel({ member, year, month, monthDays, stats, todayKey, getShift
             </table>
           )}
 
-        <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6, marginBottom: 6 }}>Vacaciones y ausencias · {away.length}</div>
+        <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6, marginBottom: 6 }}>Vacaciones y ausencias en {mes} · {away.length}</div>
         {away.length === 0
-          ? <div style={{ fontSize: 13, opacity: 0.55, marginBottom: 20 }}>Sin vacaciones ni días libres marcados.</div>
+          ? <div style={{ fontSize: 13, opacity: 0.55, marginBottom: 20 }}>Sin vacaciones ni días libres en {mes}.</div>
           : (
             <table className="ts-list" style={{ marginBottom: 22 }}>
               <tbody>
@@ -472,6 +489,7 @@ function PersonPanel({ member, year, month, monthDays, stats, todayKey, getShift
 
         {/* Month summary */}
         <div className="tile dark" style={{ padding: 16, flexDirection: 'row', flexWrap: 'wrap', gap: 24, alignItems: 'flex-end' }}>
+          <div className="eyebrow eyebrow-sm" style={{ color: C.amarillo, width: '100%', marginBottom: -12 }}>Resumen de {mes} {year}</div>
           <Summary label="Días trabajados" value={stats.worked} />
           <Summary label="Horas" value={fmtHours(stats.hours)} />
           <Summary label="Vacaciones" value={stats.vacaciones} />
