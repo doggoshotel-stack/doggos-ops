@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import useSchedule from './schedule/useSchedule.js';
 
 const C = {
   cream:    '#EAE8DD',
@@ -151,12 +152,38 @@ function BirdIcon({ title }) {
   );
 }
 
-export default function MonthlyView({ reservations = [], capacity = 42, now = new Date(), error, configured }) {
+// Labels for the team schedule kinds (Horario equipo → Schedule tab).
+const ABSENCE_LABEL = { vacaciones: 'Vacaciones', libre: 'Libre', baja: 'Baja' };
+
+function initials(name) {
+  const parts = String(name).trim().split(/\s+/);
+  if (parts.length > 1) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return parts[0].slice(0, 2).toUpperCase();
+}
+
+export default function MonthlyView({ reservations = [], capacity = 42, now = new Date(), error, configured, hubspotUrl, hubspotKey }) {
   const [cursor, setCursor] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
   const [selectedDay, setSelectedDay] = useState(null);
+  const schedule = useSchedule(hubspotUrl, hubspotKey);
 
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
+
+  // Who is working / away each day of this month, keyed by YYYY-MM-DD.
+  const teamByDay = useMemo(() => {
+    const prefix = `${year}-${pad2(month + 1)}-`;
+    const map = {};
+    for (const s of Object.values(schedule.shifts)) {
+      if (!s.date.startsWith(prefix)) continue;
+      const entry = map[s.date] || (map[s.date] = { working: [], away: [] });
+      (s.kind === 'turno' ? entry.working : entry.away).push(s);
+    }
+    for (const e of Object.values(map)) {
+      e.working.sort((a, b) => (a.start || '').localeCompare(b.start || '') || a.member.localeCompare(b.member));
+      e.away.sort((a, b) => a.member.localeCompare(b.member));
+    }
+    return map;
+  }, [schedule.shifts, year, month]);
 
   const days = useMemo(
     () => getMonthlyData(reservations, year, month, capacity),
@@ -222,6 +249,9 @@ export default function MonthlyView({ reservations = [], capacity = 42, now = ne
           .mv-badge-occ svg { display: none !important; }
           .mv-badge-arr, .mv-badge-dep { width: 6px; height: 6px; padding: 0 !important; font-size: 0 !important; line-height: 0; overflow: hidden; }
           .mv-pad { min-height: 54px !important; }
+          .mv-team-chip { display: none !important; }
+          .mv-team-count { display: inline !important; }
+          .mv-cell-team { justify-content: center; margin-top: 2px !important; }
           .mv-modal-overlay { padding: 0 !important; align-items: flex-end !important; }
           .mv-modal-card { padding: 20px 16px calc(20px + env(safe-area-inset-bottom)) !important; max-height: 92vh !important; border-radius: 18px 18px 0 0 !important; }
           .mv-modal-title { font-size: 32px !important; }
@@ -314,7 +344,8 @@ export default function MonthlyView({ reservations = [], capacity = 42, now = ne
             if (!d) return <div key={`pad-${idx}`} className="mv-pad" style={{ minHeight: 86 }} />;
             const tier = tierFor(d.pct);
             const isToday = isCurrentMonth && isSameYMD(d.date, now);
-            const hasActivity = d.arrivals > 0 || d.departures > 0;
+            const team = teamByDay[dayKey(d.date)];
+            const hasActivity = d.arrivals > 0 || d.departures > 0 || !!team;
             const weekdayIdx = (d.date.getDay() + 6) % 7;
             return (
               <button
@@ -373,6 +404,24 @@ export default function MonthlyView({ reservations = [], capacity = 42, now = ne
                     </span>
                   )}
                 </div>
+                {team && team.working.length > 0 && (
+                  <div
+                    className="mv-cell-team"
+                    title={`Trabajan: ${team.working.map((s) => s.member).join(', ')}`}
+                    style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 5 }}
+                  >
+                    <span className="mv-team-count" style={{ display: 'none', fontSize: 9, fontWeight: 700 }}>👤{team.working.length}</span>
+                    {team.working.map((s) => (
+                      <span
+                        key={s.member}
+                        className="mv-team-chip"
+                        style={{ background: 'rgba(255,255,255,0.75)', color: C.ink, fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, letterSpacing: '0.04em' }}
+                      >
+                        {initials(s.member)}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </button>
             );
           })}
@@ -406,6 +455,8 @@ export default function MonthlyView({ reservations = [], capacity = 42, now = ne
       {selectedDay && (
         <DayDetailModal
           day={selectedDay}
+          team={teamByDay[dayKey(selectedDay.date)]}
+          scheduleConfigured={!!hubspotUrl}
           reservations={reservations}
           onClose={() => setSelectedDay(null)}
         />
@@ -414,7 +465,7 @@ export default function MonthlyView({ reservations = [], capacity = 42, now = ne
   );
 }
 
-function DayDetailModal({ day, reservations, onClose }) {
+function DayDetailModal({ day, team, scheduleConfigured, reservations, onClose }) {
   useEffect(() => {
     const handleKey = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', handleKey);
@@ -494,6 +545,8 @@ function DayDetailModal({ day, reservations, onClose }) {
           </button>
         </div>
 
+        {scheduleConfigured && <TeamSection team={team} />}
+
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 24 }}>
           <DaySection
             title="Llegadas"
@@ -527,6 +580,39 @@ function DayDetailModal({ day, reservations, onClose }) {
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+// Who is on shift that day (from Horario equipo), plus who is away.
+function TeamSection({ team }) {
+  const working = team?.working || [];
+  const away = team?.away || [];
+  return (
+    <div style={{ marginBottom: 24, padding: 16, borderRadius: 14, background: C.ink08 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <span style={{ background: C.ink, color: C.cream, fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 999 }}>{working.length}</span>
+        <span className="eyebrow eyebrow-sm">Equipo trabajando</span>
+        <a href="#/horario" style={{ marginLeft: 'auto', fontSize: 11, color: C.ink, opacity: 0.65 }}>Horario equipo →</a>
+      </div>
+      {working.length === 0
+        ? <div style={{ fontSize: 13, opacity: 0.6 }}>Nadie tiene turno este día.</div>
+        : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {working.map((s) => (
+              <div key={s.member} title={s.note || undefined} style={{ background: C.celeste, color: C.ink, borderRadius: 10, padding: '6px 12px', fontSize: 13 }}>
+                <strong>{s.member}</strong>
+                {s.start && <span className="tabular" style={{ marginLeft: 8, opacity: 0.8 }}>{s.start}–{s.end}</span>}
+                {s.note && <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>{s.note}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      {away.length > 0 && (
+        <div style={{ fontSize: 12, opacity: 0.7, marginTop: 10 }}>
+          Fuera: {away.map((s) => `${s.member} (${ABSENCE_LABEL[s.kind] || s.kind})`).join(' · ')}
+        </div>
+      )}
     </div>
   );
 }

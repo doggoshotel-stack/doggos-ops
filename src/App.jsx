@@ -3710,7 +3710,7 @@ export default function App() {
         routeBody = <RoomsView merged={merged} roomBoard={roomBoard} onSaveRoom={saveRoomEntry} onInteractingChange={(v) => { roomInteractingRef.current = v; }} />;
         break;
       case '#/mensual':
-        routeBody = <MonthlyView reservations={bridgeReservations} capacity={meta.capacity} now={now} error={fetchErrors.bridge} configured={!!config.bridgeUrl} />;
+        routeBody = <MonthlyView reservations={bridgeReservations} capacity={meta.capacity} now={now} error={fetchErrors.bridge} configured={!!config.bridgeUrl} hubspotUrl={config.hubspotUrl} hubspotKey={config.hubspotKey} />;
         break;
       case '#/horario':
         routeBody = (

@@ -7,6 +7,7 @@
 //   · POST {action:'saveRoomBoard', reservation, room?, feed_*?, med_note?}
 //                                  → upserts the room_board tab (ops room board)
 //   · POST {action:'saveShift', date, member, kind?, start?, end?, note?}
+//   · POST {action:'saveShifts', shifts:[{date, member, kind?, start?, end?, note?}, …]}
 //   · POST {action:'saveMember', member, remove?}
 //                                  → team schedule (Schedule tab)
 // The room_board branch is fully separate from dog_extras — the photo/portal
@@ -122,6 +123,7 @@ function doPost(e) {
 
   // Team schedule: one shift per (date, member), or a roster add/remove.
   if (body.action === "saveShift") return saveShift_(body);
+  if (body.action === "saveShifts") return saveShifts_(body);
   if (body.action === "saveMember") return saveMember_(body);
 
   if (!body.dog_id) return out({ error: "missing dog_id" });
@@ -443,22 +445,51 @@ function saveShift_(body) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    var sheet = scheduleSheet_();
-    var row = [date, member, str_(body.kind), str_(body.start), str_(body.end), str_(body.note), new Date().toISOString()];
-    var empty = !row[2] && !row[3] && !row[4] && !row[5];
-    var at = findScheduleRow_(sheet, date, member);
-    if (empty) {
-      if (at !== -1) sheet.deleteRow(at);
-      return out({ ok: true, deleted: at !== -1 });
-    }
-    if (at === -1) sheet.appendRow(row);
-    else sheet.getRange(at, 1, 1, row.length).setValues([row]);
+    upsertShift_(scheduleSheet_(), body);
     return out({ ok: true });
   } catch (err) {
     return out({ error: err.toString() });
   } finally {
     lock.releaseLock();
   }
+}
+
+// Same as saveShift_, for many cells in one request (a person filling in
+// several days at once). One lock, one round trip.
+function saveShifts_(body) {
+  var list = body.shifts;
+  if (!list || !list.length) return out({ error: "missing shifts" });
+  for (var i = 0; i < list.length; i++) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(str_(list[i].date).trim())) return out({ error: "bad date" });
+    if (!str_(list[i].member).trim()) return out({ error: "missing member" });
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var sheet = scheduleSheet_();
+    for (var j = 0; j < list.length; j++) upsertShift_(sheet, list[j]);
+    return out({ ok: true, count: list.length });
+  } catch (err) {
+    return out({ error: err.toString() });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Write one shift; empty kind/start/end/note deletes the cell. Caller holds the lock.
+function upsertShift_(sheet, s) {
+  var date = str_(s.date).trim();
+  var member = str_(s.member).trim();
+  var row = [date, member, str_(s.kind), str_(s.start), str_(s.end), str_(s.note), new Date().toISOString()];
+  var empty = !row[2] && !row[3] && !row[4] && !row[5];
+  var at = findScheduleRow_(sheet, date, member);
+  if (empty) {
+    if (at !== -1) sheet.deleteRow(at);
+    return;
+  }
+  if (at === -1) sheet.appendRow(row);
+  else sheet.getRange(at, 1, 1, row.length).setValues([row]);
 }
 
 // Add (or, with remove:true, drop) a roster row. Removing a member keeps their

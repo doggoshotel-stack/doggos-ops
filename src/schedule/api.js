@@ -107,6 +107,21 @@ export function saveShift(url, key, date, member, shift) {
   });
 }
 
+/** Upsert many cells in one request. Each item: { date, member, shift|null }. */
+export function saveShifts(url, key, items) {
+  return post(url, key, {
+    action: 'saveShifts',
+    shifts: items.map(({ date, member, shift }) => ({
+      date,
+      member,
+      kind:  shift ? shift.kind || 'turno' : '',
+      start: shift ? shift.start || '' : '',
+      end:   shift ? shift.end || '' : '',
+      note:  shift ? shift.note || '' : '',
+    })),
+  });
+}
+
 export function saveMember(url, key, member, remove = false) {
   return post(url, key, { action: 'saveMember', member, remove });
 }

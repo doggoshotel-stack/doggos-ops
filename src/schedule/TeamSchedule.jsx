@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { getMonthlyData, tierFor } from '../MonthlyView.jsx';
-import { fetchSchedule, saveShift, saveMember } from './api.js';
+import useSchedule, { cellKey, ymd, shiftHours, fmtHours } from './useSchedule.js';
 
 const C = {
   cream:    '#EAE8DD',
@@ -18,13 +18,15 @@ const MONTH_NAMES_ES = [
   'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
 ];
 const WEEKDAYS_SHORT = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB'];
+const WEEKDAYS_MON_FIRST = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
+const WEEKDAYS_LONG = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-// Shift kinds. 'turno' carries hours; the rest are full-day markers.
-const KINDS = {
-  turno:      { label: 'Turno',      bg: C.celeste,   fg: C.ink },
+// Shift kinds. 'turno' carries hours; the rest are full-day absences.
+export const KINDS = {
+  turno:      { label: 'Trabajo',    bg: C.celeste,     fg: C.ink },
+  vacaciones: { label: 'Vacaciones', bg: C.amarillo,    fg: C.ink },
   libre:      { label: 'Libre',      bg: 'transparent', fg: C.ink, border: true },
-  vacaciones: { label: 'Vacaciones', bg: C.amarillo,  fg: C.ink },
-  baja:       { label: 'Baja',       bg: C.brick,     fg: C.cream },
+  baja:       { label: 'Baja',       bg: C.brick,       fg: C.cream },
 };
 
 const PRESETS = [
@@ -34,149 +36,70 @@ const PRESETS = [
 ];
 
 function pad2(n) { return String(n).padStart(2, '0'); }
-function ymd(date) { return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`; }
+const fromKey = (k) => new Date(k + 'T12:00:00');
+const shortDate = (k) => { const d = fromKey(k); return `${WEEKDAYS_SHORT[d.getDay()]} ${d.getDate()}`; };
 
-function shiftHours(s) {
-  if (!s || s.kind !== 'turno' || !s.start || !s.end) return 0;
-  const [h1, m1] = s.start.split(':').map(Number);
-  const [h2, m2] = s.end.split(':').map(Number);
-  let mins = (h2 * 60 + m2) - (h1 * 60 + m1);
-  if (mins < 0) mins += 24 * 60; // overnight
-  return mins / 60;
+function memberStats(member, monthDays, getShift) {
+  const stats = { worked: 0, hours: 0, vacaciones: 0, libre: 0, baja: 0 };
+  for (const d of monthDays) {
+    const s = getShift(ymd(d.date), member);
+    if (!s) continue;
+    if (s.kind === 'turno') { stats.worked++; stats.hours += shiftHours(s); }
+    else if (stats[s.kind] != null) stats[s.kind]++;
+  }
+  return stats;
 }
-
-function fmtHours(h) {
-  if (!h) return '0 h';
-  return `${Number.isInteger(h) ? h : h.toFixed(1).replace('.', ',')} h`;
-}
-
-const cellKey = (date, member) => `${date}|${member.toLowerCase()}`;
 
 export default function TeamSchedule({ reservations = [], capacity = 42, now = new Date(), hubspotUrl, hubspotKey, bridgeError }) {
   const [cursor, setCursor] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
-  const [roster, setRoster] = useState([]);
-  const [shifts, setShifts] = useState({});      // cellKey → shift
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(0);
   const [editing, setEditing] = useState(null);  // { date, member }
+  const [openMember, setOpenMember] = useState(null);
   const [newMember, setNewMember] = useState('');
+  const sch = useSchedule(hubspotUrl, hubspotKey);
+  const { getShift, writeShift, error, setError, loading, saving } = sch;
 
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
-
-  const load = useCallback(async () => {
-    if (!hubspotUrl) return;
-    setLoading(true);
-    setError('');
-    try {
-      const data = await fetchSchedule(hubspotUrl, hubspotKey);
-      const map = {};
-      for (const s of data.shifts) map[cellKey(s.date, s.member)] = s;
-      setShifts(map);
-      setRoster(data.roster);
-    } catch (e) {
-      setError(e.message || String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [hubspotUrl, hubspotKey]);
-
-  useEffect(() => { load(); }, [load]);
+  const monthPrefix = `${year}-${pad2(month + 1)}-`;
 
   const days = useMemo(
     () => getMonthlyData(reservations, year, month, capacity),
     [reservations, year, month, capacity]
   );
-
-  const monthPrefix = `${year}-${pad2(month + 1)}-`;
-
-  // Columns: everyone on the roster, plus anyone holding a shift this month
-  // (e.g. someone removed from the roster after their shifts were set).
-  const members = useMemo(() => {
-    const seen = new Map();
-    for (const m of roster) if (!seen.has(m.toLowerCase())) seen.set(m.toLowerCase(), m);
-    for (const s of Object.values(shifts)) {
-      if (s.date.startsWith(monthPrefix) && !seen.has(s.member.toLowerCase())) seen.set(s.member.toLowerCase(), s.member);
-    }
-    return [...seen.values()];
-  }, [roster, shifts, monthPrefix]);
-
-  const getShift = (date, member) => shifts[cellKey(date, member)] || null;
+  const members = useMemo(() => sch.membersFor(monthPrefix), [sch, monthPrefix]);
+  const statsBy = useMemo(() => {
+    const out = {};
+    for (const m of members) out[m] = memberStats(m, days, getShift);
+    return out;
+  }, [members, days, getShift]);
 
   const totals = useMemo(() => {
     const sumOcc = days.reduce((a, d) => a + d.occupancy, 0);
     const capNights = capacity * days.length;
-    const hoursBy = {};
-    for (const m of members) {
-      let h = 0, n = 0;
-      for (const d of days) {
-        const s = shifts[cellKey(ymd(d.date), m)];
-        if (s && s.kind === 'turno') { h += shiftHours(s); n++; }
-      }
-      hoursBy[m] = { hours: h, shifts: n };
-    }
     return {
       occPct: capNights > 0 ? sumOcc / capNights : 0,
       arrivals: days.reduce((a, d) => a + d.arrivals, 0),
       departures: days.reduce((a, d) => a + d.departures, 0),
       transports: days.reduce((a, d) => a + d.pickups + d.dropoffs, 0),
-      hoursBy,
     };
-  }, [days, capacity, members, shifts]);
+  }, [days, capacity]);
 
-  const writeShift = async (date, member, shift) => {
-    const k = cellKey(date, member);
-    const prev = shifts[k] || null;
-    setShifts((cur) => {
-      const next = { ...cur };
-      if (shift) next[k] = { ...shift, date, member }; else delete next[k];
-      return next;
-    });
-    setSaving((n) => n + 1);
-    try {
-      await saveShift(hubspotUrl, hubspotKey, date, member, shift);
-    } catch (e) {
-      setError(`No se pudo guardar el turno de ${member} (${date}): ${e.message || e}`);
-      setShifts((cur) => {
-        const next = { ...cur };
-        if (prev) next[k] = prev; else delete next[k];
-        return next;
-      });
-    } finally {
-      setSaving((n) => n - 1);
-    }
-  };
-
-  const addMember = async () => {
+  const addMember = () => {
     const name = newMember.trim();
-    if (!name) return;
-    if (members.some((m) => m.toLowerCase() === name.toLowerCase())) { setNewMember(''); return; }
-    setRoster((r) => [...r, name]);
     setNewMember('');
-    setSaving((n) => n + 1);
-    try { await saveMember(hubspotUrl, hubspotKey, name); }
-    catch (e) {
-      setError(`No se pudo añadir a ${name}: ${e.message || e}`);
-      setRoster((r) => r.filter((m) => m !== name));
-    } finally { setSaving((n) => n - 1); }
+    if (!name || members.some((m) => m.toLowerCase() === name.toLowerCase())) return;
+    sch.addMember(name);
+    setOpenMember(name);
   };
 
-  const removeMember = async (name) => {
-    if (!window.confirm(`¿Quitar a ${name} del equipo? Sus turnos ya guardados se mantienen.`)) return;
-    const prev = roster;
-    setRoster((r) => r.filter((m) => m.toLowerCase() !== name.toLowerCase()));
-    setSaving((n) => n + 1);
-    try { await saveMember(hubspotUrl, hubspotKey, name, true); }
-    catch (e) {
-      setError(`No se pudo quitar a ${name}: ${e.message || e}`);
-      setRoster(prev);
-    } finally { setSaving((n) => n - 1); }
+  const removeMember = (name) => {
+    if (!window.confirm(`¿Quitar a ${name} del equipo? Sus días ya guardados se mantienen.`)) return;
+    if (openMember === name) setOpenMember(null);
+    sch.removeMember(name);
   };
 
   const monthLabel = `${MONTH_NAMES_ES[month]} ${year}`.toUpperCase();
   const todayKey = ymd(now);
-  const editingShift = editing ? getShift(editing.date, editing.member) : null;
 
   return (
     <div className="ts-page" style={{ padding: '32px 32px 80px', maxWidth: 1400, margin: '0 auto' }}>
@@ -192,15 +115,34 @@ export default function TeamSchedule({ reservations = [], capacity = 42, now = n
         .ts-table tr.ts-today td { box-shadow: inset 0 2px 0 ${C.amarillo}, inset 0 -2px 0 ${C.amarillo}; }
         .ts-table .ts-sep { border-left: 1.5px solid ${C.ink15}; }
         .ts-cell-btn { width: 100%; min-width: 96px; min-height: 30px; border-radius: 8px; border: 1.5px dashed transparent; background: transparent; font: inherit; font-size: 12px; cursor: pointer; color: ${C.ink}; padding: 4px 6px; }
-        .ts-cell-btn.empty { color: ${C.ink}; opacity: 0.25; }
+        .ts-cell-btn.empty { opacity: 0.25; }
         .ts-cell-btn.empty:hover { opacity: 0.8; border-color: ${C.ink15}; }
         .ts-cell-btn:hover { box-shadow: 0 0 0 1.5px ${C.ink}; }
         .ts-input { font: inherit; font-size: 14px; padding: 8px 10px; border: 1.5px solid ${C.ink}; border-radius: 8px; background: #fff; color: ${C.ink}; }
+        .ts-person-row { display: grid; grid-template-columns: 1fr repeat(3, 110px) 32px; align-items: center; gap: 8px; padding: 14px 18px; background: transparent; border: none; border-top: 1px solid ${C.ink15}; width: 100%; font: inherit; color: ${C.ink}; text-align: left; cursor: pointer; }
+        .ts-person-row:hover { background: ${C.ink08}; }
+        .ts-person-row.open { background: ${C.ink}; color: ${C.cream}; }
+        .ts-stat-num { font-weight: 700; font-size: 15px; }
+        .ts-stat-lbl { font-size: 10px; letter-spacing: 0.14em; opacity: 0.6; text-transform: uppercase; }
+        .ts-panel { border-top: 1px solid ${C.ink}; padding: 22px 18px 26px; background: #f3f1e8; display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: 28px; }
+        .ts-mini-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+        .ts-mini-day { aspect-ratio: 1 / 1; border-radius: 8px; border: 1.5px solid ${C.ink15}; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; position: relative; padding: 0; }
+        .ts-mini-day.sel { outline: 3px solid ${C.ink}; outline-offset: 1px; }
+        .ts-list { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .ts-list td, .ts-list th { padding: 7px 6px; border-bottom: 1px solid ${C.ink08}; text-align: left; }
+        .ts-list th { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.6; font-weight: 700; }
+        .ts-list tr.ts-click { cursor: pointer; }
+        .ts-list tr.ts-click:hover td { background: ${C.ink08}; }
+        .ts-x { background: none; border: none; cursor: pointer; color: ${C.ink}; opacity: 0.5; font-size: 15px; padding: 0 4px; }
+        .ts-x:hover { opacity: 1; color: ${C.brick}; }
         @media (max-width: 760px) {
           .ts-page { padding: 20px 12px 60px !important; }
           .ts-title { font-size: 38px !important; }
           .ts-kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
           .ts-kpi-value { font-size: 30px !important; }
+          .ts-person-row { grid-template-columns: 1fr repeat(2, 64px) 24px; padding: 12px; }
+          .ts-person-row .ts-hide-sm { display: none; }
+          .ts-panel { grid-template-columns: 1fr; padding: 16px 12px 20px; }
           .ts-modal-overlay { padding: 0 !important; align-items: flex-end !important; }
           .ts-modal-card { border-radius: 18px 18px 0 0 !important; padding-bottom: calc(20px + env(safe-area-inset-bottom)) !important; }
         }
@@ -222,7 +164,7 @@ export default function TeamSchedule({ reservations = [], capacity = 42, now = n
           <button onClick={() => setCursor(new Date(year, month + 1, 1))} className="btn secondary sm" style={{ padding: '8px 12px' }} aria-label="Mes siguiente">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 3 L12 8 L6 13" /></svg>
           </button>
-          <button onClick={load} className="btn secondary sm" disabled={loading} style={{ marginLeft: 8 }}>Recargar</button>
+          <button onClick={sch.reload} className="btn secondary sm" disabled={loading} style={{ marginLeft: 8 }}>Recargar</button>
         </div>
       </header>
 
@@ -246,24 +188,57 @@ export default function TeamSchedule({ reservations = [], capacity = 42, now = n
         <KPI label="Transportes" value={String(totals.transports)} sub="ida + vuelta" />
       </div>
 
-      {/* Team roster */}
-      <div className="tile" style={{ padding: 16, marginBottom: 16, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-        <span className="eyebrow eyebrow-sm" style={{ opacity: 0.6, marginRight: 4 }}>Equipo</span>
-        {members.length === 0 && <span style={{ fontSize: 13, opacity: 0.6 }}>Añade a las personas del equipo para empezar →</span>}
-        {members.map((m) => (
-          <span key={m} className="pastilla outline" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            {m}
-            <span style={{ opacity: 0.6, fontWeight: 400 }}>{fmtHours(totals.hoursBy[m]?.hours || 0)}</span>
-            <button onClick={() => removeMember(m)} aria-label={`Quitar a ${m}`} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.ink, padding: 0, fontSize: 14, lineHeight: 1 }}>×</button>
-          </span>
-        ))}
-        <form onSubmit={(e) => { e.preventDefault(); addMember(); }} style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
-          <input className="ts-input" value={newMember} onChange={(e) => setNewMember(e.target.value)} placeholder="Nombre" style={{ width: 150, padding: '6px 10px', fontSize: 13 }} disabled={!hubspotUrl} />
-          <button type="submit" className="btn sm" disabled={!hubspotUrl || !newMember.trim()}>Añadir</button>
-        </form>
+      {/* Team list — click a person to open their month */}
+      <div className="tile" style={{ padding: 0, marginBottom: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', padding: '16px 18px' }}>
+          <div>
+            <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6 }}>Equipo</div>
+            <div style={{ fontSize: 13, opacity: 0.7, marginTop: 2 }}>Pulsa tu nombre para gestionar tus días de {MONTH_NAMES_ES[month]}.</div>
+          </div>
+          <form onSubmit={(e) => { e.preventDefault(); addMember(); }} style={{ display: 'flex', gap: 6 }}>
+            <input className="ts-input" value={newMember} onChange={(e) => setNewMember(e.target.value)} placeholder="Nombre" style={{ width: 150, padding: '6px 10px', fontSize: 13 }} disabled={!hubspotUrl} />
+            <button type="submit" className="btn sm" disabled={!hubspotUrl || !newMember.trim()}>Añadir</button>
+          </form>
+        </div>
+        {members.length === 0 && (
+          <div style={{ padding: '14px 18px', borderTop: `1px solid ${C.ink15}`, fontSize: 13, opacity: 0.6 }}>Todavía no hay nadie. Añade a las personas del equipo arriba.</div>
+        )}
+        {members.map((m) => {
+          const st = statsBy[m];
+          const open = openMember === m;
+          return (
+            <div key={m}>
+              <button className={`ts-person-row${open ? ' open' : ''}`} onClick={() => setOpenMember(open ? null : m)} aria-expanded={open}>
+                <span style={{ fontWeight: 700, fontSize: 16 }}>{m}</span>
+                <span><span className="ts-stat-num">{st.worked}</span> <span className="ts-stat-lbl">días</span></span>
+                <span><span className="ts-stat-num">{fmtHours(st.hours)}</span></span>
+                <span className="ts-hide-sm"><span className="ts-stat-num">{st.vacaciones}</span> <span className="ts-stat-lbl">vacac.</span></span>
+                <span style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 150ms', justifySelf: 'end' }}>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 3 L12 8 L6 13" /></svg>
+                </span>
+              </button>
+              {open && (
+                <PersonPanel
+                  member={m}
+                  year={year}
+                  month={month}
+                  monthDays={days}
+                  stats={st}
+                  todayKey={todayKey}
+                  getShift={getShift}
+                  writeShifts={sch.writeShifts}
+                  onEdit={(date) => setEditing({ date, member: m })}
+                  onRemove={() => removeMember(m)}
+                  disabled={!hubspotUrl}
+                />
+              )}
+            </div>
+          );
+        })}
       </div>
 
-      {/* Month grid: one row per day */}
+      {/* Month grid: one row per day, everyone side by side */}
+      <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6, margin: '0 0 8px 4px' }}>Vista general del mes</div>
       <div className="tile" style={{ padding: 0, overflow: 'auto', maxHeight: '75vh' }}>
         <table className="ts-table">
           <thead>
@@ -278,7 +253,7 @@ export default function TeamSchedule({ reservations = [], capacity = 42, now = n
                 <th key={m} className={i === 0 ? 'ts-sep' : undefined}>
                   <div style={{ fontWeight: 700 }}>{m}</div>
                   <div style={{ fontSize: 10, opacity: 0.55, fontWeight: 400 }}>
-                    {totals.hoursBy[m]?.shifts || 0} turnos · {fmtHours(totals.hoursBy[m]?.hours || 0)}
+                    {statsBy[m].worked} días · {fmtHours(statsBy[m].hours)}
                   </div>
                 </th>
               ))}
@@ -314,14 +289,11 @@ export default function TeamSchedule({ reservations = [], capacity = 42, now = n
                   <td className="ts-sep tabular" style={{ fontWeight: 700, color: understaffed ? C.brick : C.ink }} title={understaffed ? 'Nadie asignado con actividad ese día' : undefined}>
                     {understaffed ? '⚠ 0' : working}
                   </td>
-                  {members.map((m, i) => {
-                    const s = getShift(key, m);
-                    return (
-                      <td key={m} className={i === 0 ? 'ts-sep' : undefined}>
-                        <ShiftButton shift={s} disabled={!hubspotUrl} onClick={() => setEditing({ date: key, member: m })} />
-                      </td>
-                    );
-                  })}
+                  {members.map((m, i) => (
+                    <td key={m} className={i === 0 ? 'ts-sep' : undefined}>
+                      <ShiftButton shift={getShift(key, m)} disabled={!hubspotUrl} onClick={() => setEditing({ date: key, member: m })} />
+                    </td>
+                  ))}
                 </tr>
               );
             })}
@@ -332,43 +304,203 @@ export default function TeamSchedule({ reservations = [], capacity = 42, now = n
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 12, fontSize: 11, opacity: 0.7 }}>
         <span>↗ transporte ida (recogida) · ↘ vuelta (entrega)</span>
         <span>Check-in / Check-out / Occ% / Transp. vienen de Mews (igual que Vista mensual)</span>
-        <span style={{ color: C.brick }}>⚠ día con actividad y nadie con turno</span>
+        <span style={{ color: C.brick }}>⚠ día con actividad y nadie trabajando</span>
       </div>
 
       {editing && (
         <ShiftEditor
           date={editing.date}
           member={editing.member}
-          shift={editingShift}
+          shift={getShift(editing.date, editing.member)}
           onClose={() => setEditing(null)}
           onSave={(s) => { writeShift(editing.date, editing.member, s); setEditing(null); }}
           onClear={() => { writeShift(editing.date, editing.member, null); setEditing(null); }}
-          onCopyWeek={(s) => {
-            // Same shift Mon–Fri of that week (only empty days are filled).
-            const base = new Date(editing.date + 'T12:00:00');
-            const offset = (base.getDay() + 6) % 7;
-            for (let i = 0; i < 5; i++) {
-              const d = new Date(base); d.setDate(base.getDate() - offset + i);
-              const k = ymd(d);
-              if (k === editing.date) writeShift(k, editing.member, s);
-              else if (!getShift(k, editing.member)) writeShift(k, editing.member, s);
-            }
-            setEditing(null);
-          }}
         />
       )}
     </div>
   );
 }
 
+/* ----------------------- One person's month ----------------------- */
+
+function PersonPanel({ member, year, month, monthDays, stats, todayKey, getShift, writeShifts, onEdit, onRemove, disabled }) {
+  const [selected, setSelected] = useState(() => new Set());
+  const [kind, setKind] = useState('turno');
+  const [start, setStart] = useState(PRESETS[0].start);
+  const [end, setEnd] = useState(PRESETS[0].end);
+
+  // Selection is per month — clear it when the month changes.
+  useEffect(() => { setSelected(new Set()); }, [year, month]);
+
+  const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7;
+  const keys = monthDays.map((d) => ymd(d.date));
+
+  const entries = keys.map((k) => ({ key: k, shift: getShift(k, member) })).filter((e) => e.shift);
+  const work = entries.filter((e) => e.shift.kind === 'turno');
+  const away = entries.filter((e) => e.shift.kind !== 'turno');
+
+  const toggle = (k) => setSelected((cur) => {
+    const next = new Set(cur);
+    if (next.has(k)) next.delete(k); else next.add(k);
+    return next;
+  });
+
+  const selectWeekdays = () => setSelected(new Set(keys.filter((k) => {
+    const dow = fromKey(k).getDay();
+    return dow !== 0 && dow !== 6;
+  })));
+
+  const apply = (shift) => {
+    const items = [...selected].sort().map((date) => ({ date, member, shift }));
+    writeShifts(items);
+    setSelected(new Set());
+  };
+
+  const validTimes = kind !== 'turno' || (start && end);
+  const newShift = () => ({ kind, start: kind === 'turno' ? start : '', end: kind === 'turno' ? end : '', note: '' });
+
+  return (
+    <div className="ts-panel">
+      {/* Left: calendar to pick days */}
+      <div>
+        <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6, marginBottom: 8 }}>1 · Elige los días</div>
+        <div className="ts-mini-grid" style={{ marginBottom: 4 }}>
+          {WEEKDAYS_MON_FIRST.map((w) => <div key={w} style={{ fontSize: 9, letterSpacing: '0.12em', textAlign: 'center', opacity: 0.55 }}>{w}</div>)}
+        </div>
+        <div className="ts-mini-grid">
+          {Array.from({ length: firstWeekday }).map((_, i) => <div key={`p${i}`} />)}
+          {keys.map((k) => {
+            const s = getShift(k, member);
+            const def = s ? (KINDS[s.kind] || KINDS.turno) : null;
+            return (
+              <button
+                key={k}
+                type="button"
+                className={`ts-mini-day${selected.has(k) ? ' sel' : ''}`}
+                onClick={() => toggle(k)}
+                disabled={disabled}
+                title={s ? `${def.label}${s.start ? ` ${s.start}–${s.end}` : ''}` : 'Sin asignar'}
+                style={{
+                  background: def ? (def.border ? '#fff' : def.bg) : 'transparent',
+                  color: def ? def.fg : C.ink,
+                  borderColor: k === todayKey ? C.ink : (def && !def.border ? 'transparent' : C.ink15),
+                }}
+              >
+                {fromKey(k).getDate()}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', fontSize: 12 }}>
+          <button type="button" className="pastilla outline" style={{ cursor: 'pointer' }} onClick={selectWeekdays}>Lun–Vie del mes</button>
+          {selected.size > 0 && <button type="button" className="pastilla outline" style={{ cursor: 'pointer' }} onClick={() => setSelected(new Set())}>Quitar selección</button>}
+        </div>
+
+        <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6, margin: '18px 0 8px' }}>2 · ¿Qué son? ({selected.size} {selected.size === 1 ? 'día' : 'días'})</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+          {Object.entries(KINDS).map(([k, def]) => (
+            <button key={k} type="button" onClick={() => setKind(k)} className={`btn sm ${kind === k ? '' : 'secondary'}`}>{def.label}</button>
+          ))}
+        </div>
+        {kind === 'turno' && (
+          <>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+              {PRESETS.map((p) => (
+                <button key={p.label} type="button" onClick={() => { setStart(p.start); setEnd(p.end); }}
+                  className="pastilla outline" style={{ cursor: 'pointer', background: start === p.start && end === p.end ? C.celeste : 'transparent' }}>
+                  {p.label} {p.start}–{p.end}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginBottom: 10 }}>
+              <label style={{ fontSize: 12 }}>Entrada<br /><input type="time" className="ts-input" value={start} onChange={(e) => setStart(e.target.value)} /></label>
+              <label style={{ fontSize: 12 }}>Salida<br /><input type="time" className="ts-input" value={end} onChange={(e) => setEnd(e.target.value)} /></label>
+              <span style={{ fontSize: 12, opacity: 0.6, paddingBottom: 10 }}>{fmtHours(shiftHours({ kind, start, end }))}</span>
+            </div>
+          </>
+        )}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn sm" disabled={disabled || selected.size === 0 || !validTimes} onClick={() => apply(newShift())}>
+            Guardar {selected.size || ''} {selected.size === 1 ? 'día' : 'días'}
+          </button>
+          <button className="btn danger sm" disabled={disabled || selected.size === 0} onClick={() => apply(null)}>Borrar días</button>
+        </div>
+      </div>
+
+      {/* Right: the lists + totals */}
+      <div style={{ minWidth: 0 }}>
+        <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6, marginBottom: 6 }}>Días de trabajo · {work.length}</div>
+        {work.length === 0
+          ? <div style={{ fontSize: 13, opacity: 0.55, marginBottom: 20 }}>Ningún día de trabajo este mes.</div>
+          : (
+            <table className="ts-list" style={{ marginBottom: 22 }}>
+              <thead><tr><th>Día</th><th>Horario</th><th>Nota</th><th style={{ textAlign: 'right' }}>Horas</th><th /></tr></thead>
+              <tbody>
+                {work.map(({ key, shift }) => (
+                  <tr key={key} className="ts-click" onClick={() => onEdit(key)}>
+                    <td style={{ fontWeight: 700 }}>{shortDate(key)}</td>
+                    <td className="tabular">{shift.start}–{shift.end}</td>
+                    <td style={{ opacity: 0.7, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shift.note}</td>
+                    <td className="tabular" style={{ textAlign: 'right' }}>{fmtHours(shiftHours(shift))}</td>
+                    <td style={{ width: 24 }}><button className="ts-x" aria-label="Borrar" onClick={(e) => { e.stopPropagation(); writeShifts([{ date: key, member, shift: null }]); }}>×</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+        <div className="eyebrow eyebrow-sm" style={{ opacity: 0.6, marginBottom: 6 }}>Vacaciones y ausencias · {away.length}</div>
+        {away.length === 0
+          ? <div style={{ fontSize: 13, opacity: 0.55, marginBottom: 20 }}>Sin vacaciones ni días libres marcados.</div>
+          : (
+            <table className="ts-list" style={{ marginBottom: 22 }}>
+              <tbody>
+                {away.map(({ key, shift }) => {
+                  const def = KINDS[shift.kind] || KINDS.libre;
+                  return (
+                    <tr key={key} className="ts-click" onClick={() => onEdit(key)}>
+                      <td style={{ fontWeight: 700, width: 90 }}>{shortDate(key)}</td>
+                      <td><span className="pastilla" style={{ background: def.border ? 'transparent' : def.bg, color: def.fg, border: def.border ? `1.5px solid ${C.ink}` : 'none' }}>{def.label}</span></td>
+                      <td style={{ opacity: 0.7 }}>{shift.note}</td>
+                      <td style={{ width: 24 }}><button className="ts-x" aria-label="Borrar" onClick={(e) => { e.stopPropagation(); writeShifts([{ date: key, member, shift: null }]); }}>×</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+
+        {/* Month summary */}
+        <div className="tile dark" style={{ padding: 16, flexDirection: 'row', flexWrap: 'wrap', gap: 24, alignItems: 'flex-end' }}>
+          <Summary label="Días trabajados" value={stats.worked} />
+          <Summary label="Horas" value={fmtHours(stats.hours)} />
+          <Summary label="Vacaciones" value={stats.vacaciones} />
+          <Summary label="Libres" value={stats.libre} />
+          {stats.baja > 0 && <Summary label="Baja" value={stats.baja} />}
+          <button className="btn danger sm" style={{ marginLeft: 'auto', borderColor: C.cream, color: C.cream }} onClick={onRemove}>Quitar del equipo</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Summary({ label, value }) {
+  return (
+    <div>
+      <div className="eyebrow eyebrow-sm" style={{ color: C.cream, opacity: 0.65 }}>{label}</div>
+      <div className="display tabular" style={{ fontSize: 30, lineHeight: 1, marginTop: 4, color: C.amarillo }}>{value}</div>
+    </div>
+  );
+}
+
+/* ----------------------- Single-cell editor ----------------------- */
+
 function ShiftButton({ shift, onClick, disabled }) {
   if (!shift) {
     return <button className="ts-cell-btn empty" onClick={onClick} disabled={disabled} aria-label="Añadir turno">+</button>;
   }
   const k = KINDS[shift.kind] || KINDS.turno;
-  const text = shift.kind === 'turno' && shift.start
-    ? `${shift.start}–${shift.end || '?'}`
-    : k.label;
+  const text = shift.kind === 'turno' && shift.start ? `${shift.start}–${shift.end || '?'}` : k.label;
   return (
     <button
       className="ts-cell-btn"
@@ -382,7 +514,7 @@ function ShiftButton({ shift, onClick, disabled }) {
   );
 }
 
-function ShiftEditor({ date, member, shift, onClose, onSave, onClear, onCopyWeek }) {
+function ShiftEditor({ date, member, shift, onClose, onSave, onClear }) {
   const [kind, setKind] = useState(shift?.kind || 'turno');
   const [start, setStart] = useState(shift?.start || PRESETS[0].start);
   const [end, setEnd] = useState(shift?.end || PRESETS[0].end);
@@ -394,8 +526,8 @@ function ShiftEditor({ date, member, shift, onClose, onSave, onClear, onCopyWeek
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const d = new Date(date + 'T12:00:00');
-  const title = `${['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][d.getDay()]} ${d.getDate()} ${MONTH_NAMES_ES[d.getMonth()]}`;
+  const d = fromKey(date);
+  const title = `${WEEKDAYS_LONG[d.getDay()]} ${d.getDate()} ${MONTH_NAMES_ES[d.getMonth()]}`;
   const current = () => ({ kind, start: kind === 'turno' ? start : '', end: kind === 'turno' ? end : '', note: note.trim() });
   const valid = kind !== 'turno' || (start && end);
 
@@ -436,7 +568,6 @@ function ShiftEditor({ date, member, shift, onClose, onSave, onClear, onCopyWeek
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn sm" disabled={!valid} onClick={() => onSave(current())}>Guardar</button>
-          <button className="btn secondary sm" disabled={!valid} onClick={() => onCopyWeek(current())} title="Rellena lunes–viernes de esa semana (solo días vacíos)">Lun–Vie</button>
           {shift && <button className="btn danger sm" onClick={onClear}>Borrar</button>}
           <button className="btn secondary sm" onClick={onClose} style={{ marginLeft: 'auto' }}>Cancelar</button>
         </div>
