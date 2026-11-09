@@ -39,7 +39,7 @@ function isSameYMD(a, b) {
  * A reservation occupies the day if arrival.dateOnly <= D < departure.dateOnly.
  * Times are interpreted in the client's local zone (assumed Europe/Madrid for the property).
  */
-function getMonthlyData(reservations, year, month, capacity) {
+export function getMonthlyData(reservations, year, month, capacity) {
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const valid = reservations.filter(r =>
     r && VALID_STATUS.has(r.status)
@@ -50,21 +50,27 @@ function getMonthlyData(reservations, year, month, capacity) {
   const days = [];
   for (let d = 1; d <= daysInMonth; d++) {
     const date = new Date(year, month, d);
-    let occupancy = 0, arrivals = 0, departures = 0;
+    let occupancy = 0, arrivals = 0, departures = 0, pickups = 0, dropoffs = 0;
     for (const r of valid) {
       const arrDay = new Date(r.arrival.getFullYear(), r.arrival.getMonth(), r.arrival.getDate());
       const depDay = new Date(r.departure.getFullYear(), r.departure.getMonth(), r.departure.getDate());
       if (date >= arrDay && date < depDay) occupancy++;
-      if (isSameYMD(date, arrDay)) arrivals++;
-      if (isSameYMD(date, depDay)) departures++;
+      if (isSameYMD(date, arrDay)) {
+        arrivals++;
+        if (hasTransportLeg(r.products, 'ida', r.rateName)) pickups++;
+      }
+      if (isSameYMD(date, depDay)) {
+        departures++;
+        if (hasTransportLeg(r.products, 'vuelta', r.rateName)) dropoffs++;
+      }
     }
     const pct = capacity > 0 ? occupancy / capacity : 0;
-    days.push({ day: d, date, occupancy, arrivals, departures, pct });
+    days.push({ day: d, date, occupancy, arrivals, departures, pickups, dropoffs, pct });
   }
   return days;
 }
 
-function tierFor(pct) {
+export function tierFor(pct) {
   for (const t of TIER_COLORS) if (pct <= t.max) return t;
   return TIER_COLORS[TIER_COLORS.length - 1];
 }

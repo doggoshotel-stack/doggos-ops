@@ -6,6 +6,9 @@
 //   · POST {dog_id,comments,photo} → upserts the dog_extras tab (photos/comments)
 //   · POST {action:'saveRoomBoard', reservation, room?, feed_*?, med_note?}
 //                                  → upserts the room_board tab (ops room board)
+//   · POST {action:'saveShift', date, member, kind?, start?, end?, note?}
+//   · POST {action:'saveMember', member, remove?}
+//                                  → team schedule (Schedule tab)
 // The room_board branch is fully separate from dog_extras — the photo/portal
 // pipeline is untouched.
 
@@ -28,6 +31,15 @@ const BUDGET_MONTHS = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oc
 const BUDGET_COLS = ["year", "type", "section_id", "section_label", "line_id", "line_label"]
   .concat(BUDGET_MONTHS)
   .concat(["updated_at"]);
+
+// Team schedule (sidebar → Horario equipo). One row per (date, member) shift,
+// upserted cell by cell so two people editing the month at once never clobber
+// each other. Roster rows (team members with no shift yet) have an empty date.
+// Every cell is stored as plain text: left to itself Sheets would turn
+// "2026-11-09" and "09:00" into Date objects that come back shifted by the
+// timezone offset.
+const SCHEDULE_SHEET = "Schedule";
+const SCHEDULE_COLS = ["date", "member", "kind", "start", "end", "note", "updated_at"];
 
 // Signed convivencia consent forms (public /consentimiento page). One row per
 // submission, append-only — nothing here is ever updated in place. The drawn
@@ -107,6 +119,10 @@ function doPost(e) {
 
   // Budget writes live in their own tab, keyed by year.
   if (body.action === "saveBudget") return saveBudget_(body);
+
+  // Team schedule: one shift per (date, member), or a roster add/remove.
+  if (body.action === "saveShift") return saveShift_(body);
+  if (body.action === "saveMember") return saveMember_(body);
 
   if (!body.dog_id) return out({ error: "missing dog_id" });
 
@@ -386,6 +402,87 @@ function saveSignature_(dataUrl, nombre, nowIso) {
   var file = folder.createFile(blob);
   try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
   return file.getUrl();
+}
+
+// ---------- Team schedule ----------
+
+function scheduleSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = sheetByName_(ss, SCHEDULE_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(SCHEDULE_SHEET);
+    sheet.getRange(1, 1, 1, SCHEDULE_COLS.length).setValues([SCHEDULE_COLS]);
+    sheet.setFrozenRows(1);
+  }
+  // Plain text for the whole data area, so dates/times never get auto-parsed.
+  sheet.getRange(1, 1, sheet.getMaxRows(), SCHEDULE_COLS.length).setNumberFormat("@");
+  return sheet;
+}
+
+function scheduleKeyDate_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  return String(v == null ? "" : v).trim();
+}
+
+function findScheduleRow_(sheet, date, member) {
+  var data = sheet.getDataRange().getValues();
+  var m = member.toLowerCase();
+  for (var r = 1; r < data.length; r++) {
+    if (scheduleKeyDate_(data[r][0]) === date && String(data[r][1]).trim().toLowerCase() === m) return r + 1;
+  }
+  return -1;
+}
+
+// Upsert one shift. A shift with no kind, start, end or note is a delete.
+function saveShift_(body) {
+  var date = str_(body.date).trim();
+  var member = str_(body.member).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return out({ error: "bad date" });
+  if (!member) return out({ error: "missing member" });
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var sheet = scheduleSheet_();
+    var row = [date, member, str_(body.kind), str_(body.start), str_(body.end), str_(body.note), new Date().toISOString()];
+    var empty = !row[2] && !row[3] && !row[4] && !row[5];
+    var at = findScheduleRow_(sheet, date, member);
+    if (empty) {
+      if (at !== -1) sheet.deleteRow(at);
+      return out({ ok: true, deleted: at !== -1 });
+    }
+    if (at === -1) sheet.appendRow(row);
+    else sheet.getRange(at, 1, 1, row.length).setValues([row]);
+    return out({ ok: true });
+  } catch (err) {
+    return out({ error: err.toString() });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Add (or, with remove:true, drop) a roster row. Removing a member keeps their
+// past shifts in the tab — only the roster entry goes.
+function saveMember_(body) {
+  var member = str_(body.member).trim();
+  if (!member) return out({ error: "missing member" });
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var sheet = scheduleSheet_();
+    var at = findScheduleRow_(sheet, "", member);
+    if (body.remove) {
+      if (at !== -1) sheet.deleteRow(at);
+    } else if (at === -1) {
+      sheet.appendRow(["", member, "", "", "", "", new Date().toISOString()]);
+    }
+    return out({ ok: true });
+  } catch (err) {
+    return out({ error: err.toString() });
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function str_(v) { return v == null ? "" : String(v); }
